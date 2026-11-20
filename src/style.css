@@ -32,7 +32,7 @@ button, select { font: inherit; color: inherit; }
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 4px 6px 4px 12px; }
 .qty select { background: #1a2238; border: 0; border-radius: 6px; padding: 4px 6px; }
 
-.back { position: fixed; left: 18px; top: 84px; background: var(--panel); border: 1px solid var(--line);
+.back { position: fixed; left: 18px; top: 116px; background: var(--panel); border: 1px solid var(--line);
   padding: 9px 14px; border-radius: 10px; cursor: pointer; }
 .back:hover { border-color: var(--accent); }
 .hint { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: var(--panel);
@@ -129,3 +129,16 @@ button, select { font: inherit; color: inherit; }
 .approx { position: fixed; right: 16px; bottom: 16px; font-size: 11px; color: var(--muted); background: var(--panel);
   border: 1px solid var(--line); padding: 5px 10px; border-radius: 999px; }
 body:has(.panel:not(.hidden)) .approx { display: none; }
+
+.match { display: flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 4px 8px; font-size: 13px; }
+.match input, .match select { background: #1a2238; border: 0; border-radius: 6px; padding: 4px 6px; color-scheme: dark; }
+.sky-ico { font-size: 16px; }
+@media (max-width: 760px) { .match input { width: 118px; } }
+
+.enter { position: fixed; left: 50%; bottom: 70px; transform: translateX(-50%); background: var(--green); color: #062414;
+  border: 0; font-weight: 800; font-size: 17px; padding: 14px 28px; border-radius: 999px; cursor: pointer;
+  box-shadow: 0 10px 40px #36f28f55; }
+.enter:hover { filter: brightness(1.08); }
+.panel { top: 116px; }
+@media (max-width: 760px) { .panel { top: auto; } }

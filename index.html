@@ -23,6 +23,15 @@
           <button data-mode="stadium" class="on">Estadio</button>
           <button data-mode="price">Precio</button>
           <button data-mode="view">Calidad de vista</button>
+          <button data-mode="sun">Sol y sombra</button>
+        </div>
+        <div class="match" title="Fecha y hora del partido">
+          <input type="date" id="matchDate" aria-label="Fecha del partido" />
+          <select id="matchTime" aria-label="Hora del partido">
+            <option>12:00</option><option>14:00</option><option selected>16:15</option>
+            <option>18:30</option><option>21:00</option>
+          </select>
+          <span id="matchSky" class="sky-ico">☀️</span>
         </div>
         <label class="qty">Entradas
           <select id="qty">
@@ -33,6 +42,7 @@
     </header>
 
     <button id="backBtn" class="back hidden">← Vista general</button>
+    <button id="enterBtn" class="enter">Elegir asiento →</button>
     <div id="hint" class="hint">Pasa el ratón por las gradas y haz clic en un sector</div>
     <div id="legend" class="legend hidden"></div>
     <div id="tooltip" class="tooltip hidden"></div>

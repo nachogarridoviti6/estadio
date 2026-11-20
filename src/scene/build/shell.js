@@ -20,6 +20,7 @@ export function buildSky(scene) {
       }`,
   });
   const sky = new THREE.Mesh(geo, mat);
+  sky.renderOrder = -1;
   scene.add(sky);
   return sky;
 }
@@ -47,7 +48,8 @@ export function buildRoof(cfg, scene) {
   const group = new THREE.Group();
 
   const roofGeo = new THREE.ExtrudeGeometry(
-    ringShape({ hx: rc.outerHx, hz: rc.outerHz, r: rc.outerR }, { hx: rc.hx, hz: rc.hz, r: rc.r }),
+    // Cara inferior de la cubierta (por dentro de la envolvente exterior)
+    ringShape({ hx: rc.outerHx - 12, hz: rc.outerHz - 12, r: rc.outerR - 12 }, { hx: rc.hx, hz: rc.hz, r: rc.r }),
     { depth: 3, bevelEnabled: false, curveSegments: 32 },
   );
   roofGeo.rotateX(-Math.PI / 2); // la extrusión pasa a ser vertical (+y)
@@ -89,7 +91,10 @@ export function buildRoof(cfg, scene) {
   const board = buildVideoBoard(cfg);
   group.add(board.mesh);
   scene.add(group);
-  return { group, board, roof };
+  roof.castShadow = true;
+  truss.castShadow = true;
+  board.mesh.castShadow = true;
+  return { group, board, roof, lamps };
 }
 
 // Videomarcador 360°: anillo bajo el borde de la cubierta, 6,5 m en laterales
@@ -173,6 +178,7 @@ export function buildFacade(cfg, scene) {
     m.compose(new THREE.Vector3(p.x, rc.height / 2, p.z), q, new THREE.Vector3(1, rc.height + 3, 1));
     lamas.setMatrixAt(i, m);
   }
+  lamas.castShadow = true;
   scene.add(lamas);
   // Muro interior oscuro detrás de las lamas
   const wallGeo = new THREE.ExtrudeGeometry(
@@ -181,10 +187,12 @@ export function buildFacade(cfg, scene) {
   );
   wallGeo.rotateX(-Math.PI / 2);
   const wall = new THREE.Mesh(wallGeo, new THREE.MeshStandardMaterial({ color: '#2a2f3a', roughness: 0.9 }));
+  wall.castShadow = true;
   scene.add(wall);
   // Suelo exterior (plaza)
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(700, 700), new THREE.MeshStandardMaterial({ color: '#1a1d24', roughness: 1 }));
   ground.rotation.x = -Math.PI / 2; ground.position.y = -1.5;
+  ground.receiveShadow = true;
   scene.add(ground);
   return { lamas, wall };
 }
@@ -202,5 +210,7 @@ export function buildUpperFill(venue, scene) {
   geo.rotateX(-Math.PI / 2);
   const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: '#555b66', roughness: 0.9 }));
   mesh.position.y = hTop - 1;
+  mesh.castShadow = true;
   scene.add(mesh);
+  return mesh;
 }

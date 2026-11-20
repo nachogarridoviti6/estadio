@@ -42,10 +42,32 @@ function closestInPrice(list, price) {
   return list.sort((a, b) => Math.abs(a.price - price) - Math.abs(b.price - price) || b.rating - a.rating)[0];
 }
 
-export function findContextualTips(venue, seat, { quantity = 1 } = {}) {
+export function findContextualTips(venue, seat, { quantity = 1, month = 6, daytime = true } = {}) {
   const tips = [];
   const near = (c, tol = 0.3) => c.rating >= seat.rating - tol;
   const priceOk = (c, up = 10) => c.price <= seat.price + up;
+  const warm = month >= 4 && month <= 10;
+
+  // Sol y sombra según la hora y la época del partido
+  if (daytime && warm && seat.sunFrac >= 0.5) {
+    const alt = closestInPrice(
+      candidates(venue, seat, quantity, (c) => c.sunFrac <= 0.1 && near(c) && priceOk(c)), seat.price);
+    tips.push({
+      id: 'sun', icon: '☀️', title: 'Vas a estar al sol',
+      text: `A esta hora te da el sol el ${Math.round(seat.sunFrac * 100)}% del partido.` +
+        (alt ? ' Si prefieres sombra, este tiene una vista parecida:' : ''),
+      seat: alt,
+    });
+  }
+  if (daytime && !warm && seat.sunFrac === 0) {
+    const alt = closestInPrice(
+      candidates(venue, seat, quantity, (c) => c.sunFrac >= 0.6 && near(c, 0.5) && priceOk(c)), seat.price);
+    if (alt) tips.push({
+      id: 'cold', icon: '🧥', title: 'Sombra en pleno invierno',
+      text: 'Tu asiento no ve el sol en todo el partido y hará frío. Este le da el sol con una vista parecida:',
+      seat: alt,
+    });
+  }
 
   if (!seat.covered) {
     const alt = closestInPrice(

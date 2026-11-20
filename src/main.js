@@ -1,6 +1,7 @@
 import { STADIUM } from './venue/stadiumConfig.js';
 import { generateVenue } from './venue/generateVenue.js';
 import { findBetterDeals, findContextualTips } from './analysis/recommend.js';
+import { madridToUTC } from './analysis/sun.js';
 import { StadiumScene } from './scene/StadiumScene.js';
 
 const $ = (id) => document.getElementById(id);
@@ -16,7 +17,26 @@ $('loading').classList.add('done');
 setTimeout(() => $('loading').remove(), 800);
 window.__seatview = { venue, scene }; // útil para depurar
 
-const state = { seat: null, deals: [], qty: 2 };
+const state = { seat: null, deals: [], qty: 2, month: 4, daytime: true };
+
+// ---------- hora del partido ----------
+$('matchDate').value = '2027-04-17';
+function applyMatchTime() {
+  const [y, m, d] = $('matchDate').value.split('-').map(Number);
+  const [hh, mm] = $('matchTime').value.split(':').map(Number);
+  if (!y) return;
+  state.month = m;
+  scene.setMatchTime(madridToUTC(y, m, d, hh, mm));
+}
+scene.on('time', ({ sun, day, anyDay }) => {
+  state.daytime = anyDay;
+  $('matchSky').textContent = day > 0.6 ? '☀️' : day > 0.1 ? '🌇' : '🌙';
+  $('matchSky').title = `Sol a ${Math.round(sun.elevation)}° sobre el horizonte`;
+  if (state.seat) selectSeat(state.seat, { fly: false });
+});
+$('matchDate').addEventListener('change', applyMatchTime);
+$('matchTime').addEventListener('change', applyMatchTime);
+applyMatchTime();
 $('eventName').textContent = `${STADIUM.event} · ${STADIUM.name}`;
 
 const seatTitle = (s) => `Sector ${s.sectorId} · Fila ${s.row} · Asiento ${s.number}`;
@@ -24,6 +44,7 @@ const eur = (v) => `${v.toLocaleString('es-ES')} €`;
 
 // ---------- color / leyenda ----------
 const LEGENDS = {
+  sun: { title: 'Sol durante el partido', grad: '#3d5f99,#9a8a5c,#ffb020', ends: () => ['Sombra', 'Sol todo el partido'] },
   price: { title: 'Precio por entrada', grad: '#20b2a0,#8bd346,#f4c542,#f08a3c,#e0457b', ends: () => {
     const p = venue.seats.map((s) => s.price); return [eur(Math.min(...p)), eur(Math.max(...p))]; } },
   view: { title: 'Calidad de la vista', grad: '#d64545,#f08a3c,#f0c429,#8bd346,#20c070', ends: () => ['3 / 10', '10 / 10'] },
@@ -48,9 +69,13 @@ $('qty').addEventListener('change', (e) => {
 });
 
 // ---------- navegación ----------
+$('enterBtn').addEventListener('click', () => scene.goOverview());
+$('hint').textContent = 'Gira el estadio arrastrando · pulsa «Elegir asiento» para entrar';
 $('backBtn').addEventListener('click', () => {
   if (scene.mode === 'seat' && scene.focusSector) {
     scene.goSector(scene.focusSector);
+  } else if (scene.mode === 'overview') {
+    scene.goIntro();
   } else {
     state.seat = null;
     scene.setSelection(null);
@@ -60,14 +85,16 @@ $('backBtn').addEventListener('click', () => {
 });
 
 const HINTS = {
+  intro: 'Gira el estadio arrastrando · pulsa «Elegir asiento» para entrar',
   overview: 'Pasa el ratón por las gradas y haz clic en un sector',
   sector: 'Haz clic en un asiento libre para ver su vista',
   seat: 'Arrastra para mirar alrededor · haz clic en otro asiento para cambiar',
 };
 scene.on('mode', (mode) => {
   $('hint').textContent = HINTS[mode];
-  $('backBtn').classList.toggle('hidden', mode === 'overview');
-  $('backBtn').textContent = mode === 'seat' ? '← Volver al sector' : '← Vista general';
+  $('backBtn').classList.toggle('hidden', mode === 'intro');
+  $('backBtn').textContent = { seat: '← Volver al sector', sector: '← Vista general', overview: '← Ver exterior' }[mode] || '';
+  $('enterBtn').classList.toggle('hidden', mode !== 'intro');
 });
 
 // ---------- tooltip ----------
@@ -100,7 +127,7 @@ scene.on('seatClick', (seat) => {
 function selectSeat(seat, { fly = true } = {}) {
   state.seat = seat;
   state.deals = findBetterDeals(venue, seat, { quantity: state.qty, limit: 5 });
-  state.tips = findContextualTips(venue, seat, { quantity: state.qty });
+  state.tips = findContextualTips(venue, seat, { quantity: state.qty, month: state.month, daytime: state.daytime });
   scene.focusSector = venue.sectorById[seat.sectorId];
   scene.setSelection(seat, state.deals);
   if (fly) scene.goSeat(seat);
@@ -192,6 +219,12 @@ function seatChips(s) {
     [s.accessDist <= 12 ? 'good' : s.accessDist <= 22 ? '' : 'bad', '🚪', `Acceso a ${s.accessDist} m`],
     [s.barDist <= 25 ? 'good' : s.barDist <= 45 ? '' : 'bad', '🍺', `Bar y aseos a ${s.barDist} m`],
   ];
+  if (state.daytime) {
+    const p = Math.round((s.sunFrac || 0) * 100);
+    chips.push(p === 0 ? ['', '🌥', 'Sombra todo el partido']
+      : p >= 80 ? [state.month >= 4 && state.month <= 10 ? 'bad' : 'good', '☀️', 'Sol casi todo el partido']
+      : ['', '🌤', `Sol el ${p}% del partido`]);
+  } else chips.push(['', '🌙', 'Partido de noche']);
   if (sec.zone) chips.push([sec.zone.id === 'familiar' ? 'good' : 'bad', sec.zone.icon, sec.zone.label]);
   return chips;
 }

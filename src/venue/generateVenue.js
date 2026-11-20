@@ -52,29 +52,47 @@ export function generateVenue(cfg, { seed = 11 } = {}) {
 
   const sectors = [];
   const seats = [];
-  const ranges = standRanges(contour);
+  const L = contour.length;
+  const standOf = (p) => {
+    if (Math.abs(p.nx) > 0.5 || p.corner) return p.x > 0 ? 'N' : 'S';
+    return p.z > 0 ? 'O' : 'E';
+  };
+  const standById = Object.fromEntries(cfg.stands.map((st) => [st.id, st]));
 
   cfg.tiers.forEach((tier, ti) => {
     const nextTier = cfg.tiers[ti + 1];
-    let counter = 1;
-    cfg.stands.forEach((stand, si) => {
-      const [S0, S1] = ranges[si];
-      const span = (S1 - S0 - cfg.aisle * stand.sectors) / stand.sectors;
-      for (let j = 0; j < stand.sectors; j++) {
-        const id = `${tier.digit}${String(counter++).padStart(2, '0')}`;
-        const key = `${stand.id}${tier.digit}-${j + 1}`;
-        const zone = zoneByKey[key] || null;
-        const s0 = S0 + cfg.aisle / 2 + j * (span + cfg.aisle);
-        const s1 = s0 + span;
-        const center = (stand.sectors - 1) / 2;
-        const centrality = 1 - 0.22 * (Math.abs(j - center) / center);
-        let basePrice = round5(cfg.tierPrice[tier.key] * stand.priceFactor * centrality);
-        if (zone?.id === 'vip') basePrice = round5(basePrice * 2.4);
-        const standing = zone?.id === 'animacion';
-        const occupancy = 0.5 + 0.35 * centrality * rand() + (standing ? 0.25 : 0);
+    const nb = tier.numbering;
+    // Tramos de cada lado en el orden del plano (N → O → S → E), recorridos
+    // con s decreciente. nb.counts = sectores por lado según el plano.
+    const [rO, rN, rE, rS] = standRanges(contour);
+    const sides = [rN, rO, rS, rE];
+    const spans = [];
+    sides.forEach(([a0, a1], k) => {
+      const n = nb.counts[k];
+      const w = (a1 - a0) / n;
+      for (let i = 0; i < n; i++) spans.push([a1 - (i + 1) * w, a1 - i * w]);
+    });
+    for (let j = 0; j < spans.length; j++) {
+      const id = String(nb.from + j * nb.step);
+      const zone = zoneByKey[id] || null;
+      let s0 = spans[j][0] + cfg.aisle / 2;
+      s0 = ((s0 % L) + L) % L;
+      const s1 = s0 + (spans[j][1] - spans[j][0]) - cfg.aisle;
+      const mid = contour.at((s0 + s1) / 2, 0);
+      const stand = standById[standOf(mid)];
+      // Precio: más caro cuanto más centrado en su lateral/fondo
+      const along = stand.id === 'O' || stand.id === 'E'
+        ? Math.abs(mid.x) / contour.hx
+        : (mid.corner ? 1 : Math.abs(mid.z) / contour.hz);
+      const centrality = 1 - 0.25 * Math.min(1, along);
+      let basePrice = round5(cfg.tierPrice[tier.key] * stand.priceFactor * centrality);
+      if (zone?.id === 'vip') basePrice = round5(basePrice * 2.4);
+      const standing = zone?.id === 'animacion';
+      const occupancy = 0.5 + 0.35 * centrality * rand() + (standing ? 0.25 : 0);
 
+      {
         const sector = {
-          id, key, name: `Sector ${id}`,
+          id, key: id, name: `Sector ${id}`,
           standId: stand.id, standName: stand.name,
           tier: tier.key, tierLabel: tier.label, tierIndex: ti,
           index: j, basePrice, zone,
@@ -122,7 +140,7 @@ export function generateVenue(cfg, { seed = 11 } = {}) {
         }
         sectors.push(sector);
       }
-    });
+    }
   });
 
   for (const s of seats) {

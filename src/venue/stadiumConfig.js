@@ -29,20 +29,30 @@ export const STADIUM = {
 
   // Niveles (de abajo arriba). u0 = distancia horizontal desde el contorno base
   // hasta la primera fila; h0 = altura del primer escalón sobre el césped.
+  // numbering: numeración de sectores según el plano de zonas. Empieza en el
+  // fondo norte (lado este) y gira en sentido antihorario visto en planta.
+  // counts = sectores en [norte, oeste, sur, este]. 2xx y 4xx no aparecen en
+  // el plano: copian el reparto de 1xx y de los 3xx pares.
   tiers: [
-    { key: 't1', label: 'Grada Baja',         digit: 1, rows: 27, rowDepth: 0.80, rise: 0.40, h0: 1.4,  u0: 0 },
-    { key: 't2', label: 'Primer Anfiteatro',  digit: 2, rows: 14, rowDepth: 0.80, rise: 0.62, h0: 15.0, u0: 16.0 },
-    { key: 't3', label: 'Segundo Anfiteatro', digit: 3, rows: 12, rowDepth: 0.80, rise: 0.68, h0: 26.5, u0: 23.5 },
-    { key: 't4', label: 'Tercer Anfiteatro',  digit: 4, rows: 14, rowDepth: 0.78, rise: 0.72, h0: 37.5, u0: 29.5 },
-    { key: 't5', label: 'Cuarto Anfiteatro',  digit: 5, rows: 12, rowDepth: 0.76, rise: 0.75, h0: 50.5, u0: 36.5 },
+    { key: 't1', label: 'Grada Baja',         digit: 1, rows: 27, rowDepth: 0.80, rise: 0.40, h0: 1.4,  u0: 0,
+      numbering: { from: 101, step: 1, counts: [8, 9, 11, 17] } },
+    { key: 't2', label: 'Primer Anfiteatro',  digit: 2, rows: 14, rowDepth: 0.80, rise: 0.62, h0: 15.0, u0: 16.0,
+      numbering: { from: 201, step: 1, counts: [8, 9, 11, 17] } },
+    { key: 't3', label: 'Segundo Anfiteatro', digit: 3, rows: 12, rowDepth: 0.80, rise: 0.68, h0: 26.5, u0: 23.5,
+      numbering: { from: 301, step: 2, counts: [9, 10, 13, 8] } },
+    { key: 't4', label: 'Tercer Anfiteatro',  digit: 4, rows: 14, rowDepth: 0.78, rise: 0.72, h0: 37.5, u0: 29.5,
+      numbering: { from: 302, step: 2, counts: [8, 10, 13, 9] } },
+    { key: 't5', label: 'Cuarto Anfiteatro',  digit: 5, rows: 12, rowDepth: 0.76, rise: 0.75, h0: 50.5, u0: 36.5,
+      numbering: { from: 401, step: 1, counts: [8, 10, 13, 9] } },
   ],
 
-  // Gradas en orden de recorrido del contorno. Las esquinas van con los fondos.
+  // Gradas (el sector pertenece a la grada según su posición; las esquinas, a los fondos).
+  // Orientación como el plano real: norte = fondo x+, la Castellana al oeste (z+).
   stands: [
-    { id: 'O', name: 'Lateral Oeste', sectors: 6, priceFactor: 1.15 },
-    { id: 'N', name: 'Fondo Norte',   sectors: 5, priceFactor: 0.62 },
-    { id: 'E', name: 'Lateral Este',  sectors: 6, priceFactor: 1.0 },
-    { id: 'S', name: 'Fondo Sur',     sectors: 5, priceFactor: 0.6 },
+    { id: 'O', name: 'Lateral Oeste', priceFactor: 1.15 },
+    { id: 'N', name: 'Fondo Norte',   priceFactor: 0.62 },
+    { id: 'E', name: 'Lateral Este',  priceFactor: 1.0 },
+    { id: 'S', name: 'Fondo Sur',     priceFactor: 0.6 },
   ],
   // Precio base por nivel (lateral, sector central).
   tierPrice: { t1: 120, t2: 105, t3: 85, t4: 65, t5: 45 },
@@ -56,15 +66,15 @@ export const STADIUM = {
   barSpacing: 40,
 
   zones: [
-    { id: 'animacion', label: 'Grada de animación', icon: '📣', sectors: ['S1-2', 'S1-3', 'S1-4'],
+    { id: 'animacion', label: 'Grada de animación', icon: '📣', sectors: ['122', '123', '124'],
       note: 'Se anima de pie todo el partido. Ambientazo, pero no es para ver sentado.' },
-    { id: 'visitante', label: 'Afición visitante', icon: '🧳', sectors: ['N5-5'],
+    { id: 'visitante', label: 'Afición visitante', icon: '🧳', sectors: ['403', '404'],
       note: 'Sector reservado a la afición del equipo rival.' },
-    { id: 'junto-visitante', label: 'Junto a la afición visitante', icon: '⚠️', sectors: ['N5-4', 'N4-5'],
+    { id: 'junto-visitante', label: 'Junto a la afición visitante', icon: '⚠️', sectors: ['402', '405', '304', '306'],
       note: 'Separación con malla y más presencia de seguridad.' },
-    { id: 'familiar', label: 'Zona familiar', icon: '👨‍👩‍👧', sectors: ['E2-5'],
+    { id: 'familiar', label: 'Zona familiar', icon: '👨‍👩‍👧', sectors: ['236', '237'],
       note: 'Ambiente tranquilo, menores con descuento y aseos con cambiador cerca.' },
-    { id: 'vip', label: 'Palco VIP', icon: '🥂', sectors: ['O2-3', 'O2-4'],
+    { id: 'vip', label: 'Palco VIP', icon: '🥂', sectors: ['211', '212', '213', '214', '215'],
       note: 'Zona hospitality: catering incluido y acceso preferente.' },
   ],
 };

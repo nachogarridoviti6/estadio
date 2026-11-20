@@ -130,6 +130,7 @@ export function buildStands(venue, scene) {
       const mesh = new THREE.Mesh(geo, standMat.clone());
       mesh.userData.sector = sec;
       mesh.receiveShadow = true;
+      mesh.castShadow = true;
       sec.mesh = mesh;
       scene.add(mesh);
       meshes.push(mesh);
@@ -139,6 +140,7 @@ export function buildStands(venue, scene) {
       if (a1 < a0) a1 += contour.length;
       const aisle = new THREE.Mesh(sweepProfile(contour, a0, a1, profile, { stepLine: 0.5, stepCorner: 0.5 }), aisleMat);
       aisle.receiveShadow = true;
+      aisle.castShadow = true;
       scene.add(aisle);
     });
   });

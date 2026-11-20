@@ -15,11 +15,11 @@ export function buildCrowd(venue, atlas, scene) {
   const mat = new THREE.ShaderMaterial({
     uniforms: THREE.UniformsUtils.merge([
       THREE.UniformsLib.fog,
-      { uAtlas: { value: null }, uGrid: { value: new THREE.Vector2(atlas.cols, atlas.rows) }, uLight: { value: 1.0 }, uTime: { value: 0 } },
+      { uAtlas: { value: null }, uGrid: { value: new THREE.Vector2(atlas.cols, atlas.rows) }, uLight: { value: 1.0 }, uTime: { value: 0 }, uDay: { value: 0 } },
     ]),
     vertexShader: /* glsl */ `
-      attribute float aVariant; attribute float aStanding; attribute float aShade;
-      uniform vec2 uGrid; uniform float uTime;
+      attribute float aVariant; attribute float aStanding; attribute float aShade; attribute float aSun;
+      uniform vec2 uGrid; uniform float uTime; uniform float uDay;
       varying vec2 vUv; varying float vShade;
       #include <fog_pars_vertex>
       void main() {
@@ -33,6 +33,8 @@ export function buildCrowd(venue, atlas, scene) {
         if (aShade > 1.5) uv0.x = 1.0 - uv0.x;  // variantes en espejo para que no se repitan
         vUv = (vec2(aVariant, uGrid.y - 1.0 - row) + uv0) / uGrid;
         vShade = aShade > 1.5 ? aShade - 2.0 : aShade;
+        // De día: al sol más luminosos, a la sombra más apagados
+        vShade *= mix(1.0, aSun > 0.5 ? 1.45 : 0.72, uDay);
         vec3 p = position;
         // la grada de animación bota
         p.y += aStanding * max(0.0, sin(uTime * 7.0 + aVariant * 1.7 + center.x * 0.3)) * 0.12;
@@ -77,6 +79,8 @@ export function buildCrowd(venue, atlas, scene) {
   geo.setAttribute('aVariant', new THREE.InstancedBufferAttribute(variant, 1));
   geo.setAttribute('aStanding', new THREE.InstancedBufferAttribute(standing, 1));
   geo.setAttribute('aShade', new THREE.InstancedBufferAttribute(shade, 1));
+  geo.setAttribute('aSun', new THREE.InstancedBufferAttribute(new Float32Array(people.length), 1));
+  mesh.userData.people = people;
   mesh.frustumCulled = false;
   scene.add(mesh);
   return mesh;

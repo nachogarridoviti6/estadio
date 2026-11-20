@@ -12,8 +12,12 @@ import { buildPitch } from './build/pitch.js';
 import { loadHumanAssets, buildCrowdAtlas } from './build/humans.js';
 import { buildCrowd } from './build/crowd.js';
 import { loadMatch } from './build/players.js';
-import { buildSky, buildRoof, buildFacade, buildUpperFill } from './build/shell.js';
+import { buildSky, buildRoof, buildUpperFill } from './build/shell.js';
+import { buildShell } from './build/exterior.js';
+import { buildCity } from './build/city.js';
 import { parapetTop } from '../venue/generateVenue.js';
+import { LightingRig } from './build/lighting.js';
+import { sunPosition, sunVector, seatInSun, computeSunExposure } from '../analysis/sun.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const v3 = (a) => new THREE.Vector3(a[0], a[1], a[2]);
@@ -23,6 +27,8 @@ const smooth = (t) => t * t * (3 - 2 * t);
 const COLORS = {
   sold: new THREE.Color('#20242c'),
   hover: new THREE.Color('#ff8a1f'),
+  sun: new THREE.Color('#ffb020'),
+  shade: new THREE.Color('#3d5f99'),
   priceStops: ['#20b2a0', '#8bd346', '#f4c542', '#f08a3c', '#e0457b'].map((c) => new THREE.Color(c)),
   viewStops: ['#d64545', '#f08a3c', '#f0c429', '#8bd346', '#20c070'].map((c) => new THREE.Color(c)),
 };
@@ -33,6 +39,10 @@ function gradient(stops, t) {
 }
 
 const OVERVIEW = { pos: new THREE.Vector3(150, 230, 210), target: new THREE.Vector3(0, 0, 0), fov: 40 };
+// Vista de presentación: desde el suroeste, sobre la Castellana
+const INTRO = { pos: new THREE.Vector3(-250, 95, 320), target: new THREE.Vector3(0, 18, 0), fov: 38 };
+// Altura del corte de la envolvente al elegir asiento (para ver las gradas)
+const CUT = { full: 200, cutaway: 24 };
 
 export class StadiumScene {
   static async create(container, venue, onProgress = () => {}) {
@@ -45,7 +55,7 @@ export class StadiumScene {
     this.venue = venue;
     this.cfg = venue.cfg;
     this.container = container;
-    this.mode = 'overview';
+    this.mode = 'intro';
     this.colorMode = 'stadium';
     this.listeners = {};
     this.anim = null;
@@ -58,6 +68,9 @@ export class StadiumScene {
     r.setPixelRatio(Math.min(window.devicePixelRatio, this.quality === 'high' ? 2 : 1.5));
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.toneMappingExposure = 1.0;
+    r.localClippingEnabled = true;
+    this.clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), CUT.full);
+    this.clipTarget = CUT.full;
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFSoftShadowMap;
     this.container.appendChild(r.domElement);
@@ -65,10 +78,13 @@ export class StadiumScene {
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog('#0b0f1c', 350, 1100);
     this.camera = new THREE.PerspectiveCamera(OVERVIEW.fov, 1, 0.3, 2500);
-    this.camera.position.copy(OVERVIEW.pos);
+    this.camera.position.copy(INTRO.pos);
+    this.camera.fov = INTRO.fov;
     this.controls = new OrbitControls(this.camera, r.domElement);
     this.controls.enableDamping = true;
     this.setOverviewControls();
+    this.controls.target.copy(INTRO.target);
+    Object.assign(this.controls, { maxDistance: 700, maxPolarAngle: Math.PI * 0.47 });
 
     onProgress('Cargando iluminación y texturas…', 0.1);
     const [env, grass] = await Promise.all([
@@ -76,19 +92,22 @@ export class StadiumScene {
       new THREE.TextureLoader().loadAsync('/assets/grasslight-big.jpg'),
     ]);
     const pmrem = new THREE.PMREMGenerator(r);
-    this.scene.environment = pmrem.fromEquirectangular(env).texture;
+    this.nightEnv = pmrem.fromEquirectangular(env).texture;
+    this.scene.environment = this.nightEnv;
     this.scene.environmentIntensity = 0.5;
     env.dispose();
 
     onProgress('Construyendo el estadio…', 0.3);
-    buildSky(this.scene);
-    this.buildLights();
+    const nightSky = buildSky(this.scene);
+    this.lighting = new LightingRig(r, this.scene, this.cfg, { quality: this.quality, nightEnv: this.nightEnv, nightSky });
     buildPitch(this.cfg, this.scene, grass);
     this.sectorMeshes = buildStands(this.venue, this.scene);
     this.buildLedRing();
     this.buildSeats();
-    buildUpperFill(this.venue, this.scene);
-    this.facade = buildFacade(this.cfg, this.scene);
+    const fill = buildUpperFill(this.venue, this.scene);
+    fill.material.clippingPlanes = [this.clipPlane];
+    this.exterior = buildShell(this.cfg, this.scene, this.clipPlane);
+    this.city = buildCity(this.scene);
     this.roof = buildRoof(this.cfg, this.scene);
     this.roof.group.visible = false;
 
@@ -116,26 +135,6 @@ export class StadiumScene {
   emit(evt, data) { (this.listeners[evt] || []).forEach((fn) => fn(data)); }
 
   // ---------- construcción ----------
-  buildLights() {
-    this.scene.add(new THREE.HemisphereLight('#bcc8ff', '#202430', 0.55));
-    // Focos de la cubierta: cuatro direcciones, una con sombras sobre el campo
-    const rh = this.cfg.roof.height;
-    const dirs = [[0, rh, 70], [0, rh, -70], [90, rh, 0], [-90, rh, 0]];
-    dirs.forEach((p, i) => {
-      const l = new THREE.DirectionalLight('#fff6ea', i === 0 ? 1.6 : 0.9);
-      l.position.set(...p);
-      if (i === 0) {
-        l.castShadow = true;
-        const sz = this.quality === 'high' ? 4096 : 2048;
-        l.shadow.mapSize.set(sz, sz);
-        Object.assign(l.shadow.camera, { left: -75, right: 75, top: 55, bottom: -55, near: 10, far: 200 });
-        l.shadow.bias = -0.0004;
-        l.shadow.normalBias = 0.02;
-      }
-      this.scene.add(l);
-    });
-  }
-
   // Anillo LED en el peto del primer anfiteatro
   buildLedRing() {
     const t = this.cfg.tiers[1];
@@ -283,10 +282,32 @@ export class StadiumScene {
   // ---------- color ----------
   setColorMode(mode) { this.colorMode = mode; this.applyColors(); }
 
+  // Cambia la hora del partido: luz, cielo, sombras y sol/sombra de cada asiento
+  setMatchTime(kickoffUTC) {
+    this.kickoff = kickoffUTC;
+    const exposure = computeSunExposure(this.venue, kickoffUTC);
+    // La escena se muestra a los 20 minutos de partido
+    const now = new Date(kickoffUTC.getTime() + 20 * 60000);
+    const sun = sunPosition(now);
+    const dir = sunVector(sun);
+    const { day } = this.lighting.update(dir, { lamps: this.roof.lamps });
+    this.exterior.setNight(1 - day);
+    this.city.setNight(1 - day);
+    const people = this.crowd.userData.people;
+    const attr = this.crowd.geometry.getAttribute('aSun');
+    people.forEach((s, i) => { attr.array[i] = day > 0.15 && seatInSun(this.venue, s, dir) ? 1 : 0; });
+    attr.needsUpdate = true;
+    this.crowd.material.uniforms.uDay.value = day;
+    this.dayFactor = day;
+    if (this.colorMode === 'sun') this.applyColors();
+    this.emit('time', { kickoffUTC, sun, day, anyDay: exposure.anyDay });
+  }
+
   seatColor(s) {
     if (this.colorMode === 'stadium') return new THREE.Color(this.cfg.seatColor);
     if (s.sold) return COLORS.sold;
     if (this.colorMode === 'price') return gradient(COLORS.priceStops, (s.price - this.pMin) / (this.pMax - this.pMin));
+    if (this.colorMode === 'sun') return COLORS.shade.clone().lerp(COLORS.sun, s.sunFrac ?? 0);
     return gradient(COLORS.viewStops, (s.rating - 3) / 7);
   }
 
@@ -355,7 +376,21 @@ export class StadiumScene {
     this.anim.finalTarget = target.clone();
   }
 
+  // Vista exterior de presentación
+  goIntro() {
+    this.showDetailSeats(null);
+    this.mode = 'intro';
+    this.clipTarget = CUT.full;
+    this.roof.group.visible = true;
+    this.crowd.visible = true;
+    this.setOverviewControls();
+    Object.assign(this.controls, { maxDistance: 700, maxPolarAngle: Math.PI * 0.47 });
+    this.flyTo(INTRO.pos.clone(), INTRO.target.clone(), { fov: INTRO.fov, duration: 2.4 });
+    this.emit('mode', this.mode);
+  }
+
   goOverview() {
+    this.clipTarget = CUT.cutaway;
     this.showDetailSeats(null);
     this.mode = 'overview';
     this.roof.group.visible = false;
@@ -367,6 +402,7 @@ export class StadiumScene {
 
   goSector(sec) {
     this.showDetailSeats(null);
+    this.clipTarget = CUT.cutaway;
     this.mode = 'sector';
     this.focusSector = sec;
     this.roof.group.visible = false;
@@ -388,6 +424,7 @@ export class StadiumScene {
   goSeat(seat) {
     const fromSeat = this.mode === 'seat';
     this.mode = 'seat';
+    this.clipTarget = CUT.full;
     this.crowd.visible = true;
     const eye = v3(seat.eye);
     const n = v3(seat.normal);
@@ -493,7 +530,7 @@ export class StadiumScene {
   }
 
   onHover(e) {
-    if (this.anim) return;
+    if (this.anim || this.mode === 'intro') return;
     const hit = this.pick(e);
     const sec = hit?.sector || null;
     if (sec !== this.hoverSector) {
@@ -520,7 +557,7 @@ export class StadiumScene {
   }
 
   onClick(e) {
-    if (this.anim) return;
+    if (this.anim || this.mode === 'intro') return;
     const hit = this.pick(e);
     if (!hit) return;
     if (this.mode === 'overview') {
@@ -567,6 +604,9 @@ export class StadiumScene {
       this.controls.update();
     }
     this.match.update(dt);
+    this.city.update(dt, 1 - (this.dayFactor ?? 0));
+    // Corte animado de la envolvente
+    this.clipPlane.constant += (this.clipTarget - this.clipPlane.constant) * Math.min(1, dt * 2.5);
     this.crowd.material.uniforms.uTime.value = time;
     this.ledTex.offset.x = (time * 0.01) % 1;
     for (const mk of [this.selMarker, ...this.recoMarkers]) {
