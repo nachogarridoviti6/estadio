@@ -126,7 +126,7 @@ function armsDown(r, armsUp) {
     rot(r, 'LeftArm', 0, 0, -0.9); rot(r, 'RightArm', 0, 0, 0.9);
     rot(r, 'LeftForeArm', 0, 0, -0.4); rot(r, 'RightForeArm', 0, 0, 0.4);
   } else {
-    rot(r, 'LeftArm', 0.25, 0, 1.15); rot(r, 'RightArm', 0.25, 0, -1.15);
+    rot(r, 'LeftArm', 0.25, 0, 0.65); rot(r, 'RightArm', 0.25, 0, -0.65); // manos en las rodillas
     rot(r, 'LeftForeArm', 0, 0.6, 0.3); rot(r, 'RightForeArm', 0, -0.6, -0.3);
   }
 }

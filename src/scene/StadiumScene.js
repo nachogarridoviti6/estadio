@@ -9,7 +9,8 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 
 import { buildStands, sweepProfile } from './build/stands.js';
 import { buildPitch } from './build/pitch.js';
-import { loadHumanAssets, buildCrowdAtlas } from './build/humans.js';
+import { loadHumanAssets, buildCrowdAtlas, makePerson, poseSitting, poseStanding, crowdVariants } from './build/humans.js';
+import { makeLabelTexture } from './textures.js';
 import { buildCrowd } from './build/crowd.js';
 import { loadMatch } from './build/players.js';
 import { buildSky, buildRoof, buildUpperFill } from './build/shell.js';
@@ -112,7 +113,7 @@ export class StadiumScene {
     this.roof.group.visible = false;
 
     onProgress('Creando el público…', 0.55);
-    const humans = await loadHumanAssets();
+    const humans = (this.humans = await loadHumanAssets());
     this.atlas = buildCrowdAtlas(r, humans);
     this.crowd = buildCrowd(this.venue, this.atlas, this.scene);
 
@@ -215,6 +216,7 @@ export class StadiumScene {
     }
     this.hiddenSeats = [];
     this.detailSeats.count = 0;
+    this.showNearPeople(seat);
     if (seat) {
       const zero = new THREE.Matrix4().makeScale(0, 0, 0);
       const e = seat.eye;
@@ -234,6 +236,47 @@ export class StadiumScene {
       if (this.detailSeats.instanceColor) this.detailSeats.instanceColor.needsUpdate = true;
     }
     this.seatMesh.instanceMatrix.needsUpdate = true;
+  }
+
+  // Personas 3D de verdad alrededor del asiento (las "fotos" planas se ven
+  // mal de cerca). Las sustituyen solo en los ~10 m más cercanos.
+  showNearPeople(seat) {
+    const crowd = this.crowd;
+    const people = crowd.userData.people;
+    if (!this.crowdIndex) this.crowdIndex = new Map(people.map((s, i) => [s.idx, i]));
+    if (this.nearPeople) {
+      for (const p of this.nearPeople.objs) this.scene.remove(p);
+      for (const [i, m] of this.nearPeople.saved) crowd.setMatrixAt(i, m);
+      crowd.instanceMatrix.needsUpdate = true;
+      this.nearPeople = null;
+    }
+    if (!seat) return;
+    const e = seat.eye;
+    const near = people
+      .map((s) => [s, (s.pos[0] - e[0]) ** 2 + (s.pos[1] - e[1]) ** 2 + (s.pos[2] - e[2]) ** 2])
+      .filter(([, d]) => d < 11 * 11)
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, 70);
+    const variants = crowdVariants();
+    const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+    const objs = [], saved = [];
+    for (const [s] of near) {
+      const i = this.crowdIndex.get(s.idx);
+      const m = new THREE.Matrix4(); crowd.getMatrixAt(i, m); saved.push([i, m]);
+      crowd.setMatrixAt(i, zero);
+      const h = (s.idx * 2654435761) >>> 0;
+      const p = makePerson(this.humans, { ...variants[h % variants.length], height: 1.68 + ((h >>> 8) % 20) / 100 });
+      if (s.standing) poseStanding(p); else poseSitting(p);
+      const yaw = Math.atan2(-s.normal[0], -s.normal[2]); // mirando al campo
+      const hold = p.position.y;
+      p.rotation.y = yaw;
+      p.position.set(s.pos[0] + s.normal[0] * 0.08, s.pos[1] + hold, s.pos[2] + s.normal[2] * 0.08);
+      p.traverse((o) => { if (o.isMesh) o.castShadow = false; });
+      this.scene.add(p);
+      objs.push(p);
+    }
+    crowd.instanceMatrix.needsUpdate = true;
+    this.nearPeople = { objs, saved };
   }
 
   buildMarkers() {
@@ -324,6 +367,7 @@ export class StadiumScene {
   }
 
   tintSector(sec, on) {
+    if (!on && sec === this.selectedSector) on = true; // el sector elegido sigue marcado
     for (const i of sec.seatIdx) this.seatMesh.setColorAt(i, on ? COLORS.hover : this.seatColor(this.venue.seats[i]));
     this.seatMesh.instanceColor.needsUpdate = true;
     sec.mesh.material.emissive.set(on ? '#7a3500' : '#000000');
@@ -356,7 +400,7 @@ export class StadiumScene {
     Object.assign(c, {
       enableZoom: false, enablePan: false, rotateSpeed: -0.35,
       minDistance: 0, maxDistance: Infinity,
-      minPolarAngle: Math.PI * 0.15, maxPolarAngle: Math.PI * 0.62,
+      minPolarAngle: Math.PI * 0.15, maxPolarAngle: Math.PI * 0.57,
       minAzimuthAngle: az - 1.4, maxAzimuthAngle: az + 1.4,
     });
   }
@@ -379,6 +423,7 @@ export class StadiumScene {
   // Vista exterior de presentación
   goIntro() {
     this.showDetailSeats(null);
+    this.markSector(null);
     this.mode = 'intro';
     this.clipTarget = CUT.full;
     this.roof.group.visible = true;
@@ -390,6 +435,7 @@ export class StadiumScene {
   }
 
   goOverview() {
+    this.markSector(null);
     this.clipTarget = CUT.cutaway;
     this.showDetailSeats(null);
     this.mode = 'overview';
@@ -400,8 +446,35 @@ export class StadiumScene {
     this.emit('mode', this.mode);
   }
 
+  // Marca el sector elegido: asientos en naranja y cartel flotante con su número
+  markSector(sec) {
+    const prev = this.selectedSector;
+    this.selectedSector = sec;
+    if (prev && prev !== sec) this.tintSector(prev, false);
+    if (this.secLabel) { this.scene.remove(this.secLabel); this.secLabel.material.map.dispose(); this.secLabel = null; }
+    if (!sec) return;
+    this.tintSector(sec, true);
+    const mid = this.venue.seats[sec.seatIdx[Math.floor(sec.seatIdx.length / 2)]];
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: makeLabelTexture(sec.id, `desde ${sec.minPrice} €`), depthTest: false, transparent: true,
+    }));
+    sp.position.set(mid.pos[0], mid.pos[1] + 9, mid.pos[2]);
+    sp.scale.set(8, 4, 1);
+    sp.renderOrder = 20;
+    this.secLabel = sp;
+    this.scene.add(sp);
+  }
+
+  // ¿Está la cámara dentro del graderío o de la estructura? (no se permite)
+  insideStructure(p) {
+    if (this.mode === 'intro') return false;
+    const { u } = this.venue.contour.project(p.x, p.z);
+    return u > -2.5 && u < 72 && p.y < this.cfg.roof.height + 8;
+  }
+
   goSector(sec) {
     this.showDetailSeats(null);
+    this.markSector(sec);
     this.clipTarget = CUT.cutaway;
     this.mode = 'sector';
     this.focusSector = sec;
@@ -410,11 +483,21 @@ export class StadiumScene {
     const mid = this.venue.seats[sec.seatIdx[Math.floor(sec.seatIdx.length / 2)]];
     const center = v3(mid.pos);
     const n = v3(mid.normal);
-    const pos = center.clone().addScaledVector(n, -42).addScaledVector(UP, 16);
+    // Cámara sobre el césped, de frente al sector y a su altura
+    const pos = center.clone().addScaledVector(n, -(34 + sec.u0 * 0.6)).addScaledVector(UP, 10 + sec.tierIndex * 2);
+    pos.y = Math.max(pos.y, center.y + 6);
     this.setOverviewControls();
     this.flyTo(pos, center, {
       fov: 45, duration: 2,
-      onDone: () => Object.assign(this.controls, { minDistance: 15, maxDistance: 120 }),
+      onDone: () => {
+        const back = pos.clone().sub(center);
+        const az = Math.atan2(back.x, back.z);
+        Object.assign(this.controls, {
+          minDistance: 18, maxDistance: 90,
+          minAzimuthAngle: az - 0.9, maxAzimuthAngle: az + 0.9,
+          minPolarAngle: Math.PI * 0.2, maxPolarAngle: Math.PI * 0.5,
+        });
+      },
     });
     this.emit('mode', this.mode);
   }
@@ -424,6 +507,8 @@ export class StadiumScene {
   goSeat(seat) {
     const fromSeat = this.mode === 'seat';
     this.mode = 'seat';
+    this.markSector(this.venue.sectorById[seat.sectorId]);
+    if (this.secLabel) this.secLabel.visible = false; // sin cartel desde el asiento
     this.clipTarget = CUT.full;
     this.crowd.visible = true;
     const eye = v3(seat.eye);
@@ -601,7 +686,12 @@ export class StadiumScene {
         this.emit('arrived', this.mode);
       }
     } else {
+      const prev = this.camera.position.clone();
       this.controls.update();
+      if (this.mode !== 'seat' && this.insideStructure(this.camera.position) && !this.insideStructure(prev)) {
+        this.camera.position.copy(prev); // no dejar que la cámara atraviese las gradas
+        this.camera.lookAt(this.controls.target);
+      }
     }
     this.match.update(dt);
     this.city.update(dt, 1 - (this.dayFactor ?? 0));
