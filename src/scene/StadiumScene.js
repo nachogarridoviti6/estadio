@@ -61,6 +61,7 @@ export class StadiumScene {
     this.buildStands();
     this.buildSeats();
     this.buildPeople();
+    this.buildAccesses();
     this.buildShell();
     this.buildMarkers();
     this.buildLabels();
@@ -126,7 +127,7 @@ export class StadiumScene {
     }
 
     // Vallas publicitarias LED
-    const boardMat = new THREE.MeshBasicMaterial({ map: makeBoardTexture('SEATVIEW  ·  TU VISTA ANTES DE COMPRAR') });
+    const boardTex = makeBoardTexture('SEATVIEW');
     const L = pitch.length / 2 + 4, W = pitch.width / 2 + 3.5;
     const backMat = new THREE.MeshStandardMaterial({ color: '#0b1124' });
     const boards = [
@@ -135,7 +136,11 @@ export class StadiumScene {
     ];
     for (const [p, len, ry] of boards) {
       const g = new THREE.Group();
-      const face = new THREE.Mesh(new THREE.PlaneGeometry(len, 0.9), boardMat);
+      // El texto se repite cada ~9 m para que no se estire en vallas largas
+      const tex = boardTex.clone();
+      tex.repeat.x = Math.round(len / 9);
+      tex.needsUpdate = true;
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(len, 0.9), new THREE.MeshBasicMaterial({ map: tex }));
       face.position.z = 0.08;
       const back = new THREE.Mesh(new THREE.BoxGeometry(len, 0.9, 0.14), backMat);
       g.add(face, back);
@@ -144,15 +149,28 @@ export class StadiumScene {
     }
 
     // Jugadores (4-4-2 contra 4-3-3), simples pero dan escala a la vista.
-    const body = new THREE.CapsuleGeometry(0.28, 1.1, 4, 8);
-    const teamA = new THREE.MeshStandardMaterial({ color: '#f5f5f5' });
-    const teamB = new THREE.MeshStandardMaterial({ color: '#d0262f' });
+    // Jugador: piernas (pantalón) + torso (camiseta) + cabeza
+    const mkPlayer = (shirt, shorts) => {
+      const legs = new THREE.CapsuleGeometry(0.16, 0.7, 3, 8); legs.translate(0, 0.5, 0); legs.scale(1.3, 1, 1);
+      const torso = new THREE.CapsuleGeometry(0.22, 0.45, 3, 8); torso.translate(0, 1.25, 0); torso.scale(1, 1, 1.35);
+      const head = new THREE.SphereGeometry(0.12, 10, 8); head.translate(0, 1.72, 0);
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(legs, new THREE.MeshStandardMaterial({ color: shorts })));
+      g.add(new THREE.Mesh(torso, new THREE.MeshStandardMaterial({ color: shirt })));
+      g.add(new THREE.Mesh(head, new THREE.MeshStandardMaterial({ color: '#c99a76' })));
+      return g;
+    };
+    const teamA = ['#f5f5f5', '#f5f5f5'], teamB = ['#d0262f', '#1d2a5a'];
     const A = [[-50, 0], [-36, -20], [-38, -7], [-38, 7], [-36, 20], [-18, -22], [-20, -7], [-20, 7], [-18, 22], [-4, -6], [-6, 8]];
     const B = [[50, 0], [36, -22], [37, -8], [37, 8], [36, 22], [16, -10], [18, 0], [16, 10], [4, -20], [2, 0], [5, 19]];
-    for (const [list, mat] of [[A, teamA], [B, teamB]]) {
-      for (const [x, z] of list) {
-        const m = new THREE.Mesh(body, mat); m.position.set(x, 0.85, z); this.scene.add(m);
-      }
+    for (const [list, [shirt, shorts]] of [[A, teamA], [B, teamB]]) {
+      list.forEach(([x, z], i) => {
+        // El portero, de otro color
+        const p = i === 0 ? mkPlayer('#2bd36b', '#111') : mkPlayer(shirt, shorts);
+        p.position.set(x, 0, z);
+        p.rotation.y = x < 0 ? Math.PI / 2 : -Math.PI / 2;
+        this.scene.add(p);
+      });
     }
     const ball = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 8), white);
     ball.position.set(-1.5, 0.22, 4);
@@ -248,26 +266,71 @@ export class StadiumScene {
     const geo = mergeGeometries([body.toNonIndexed(), head]);
     const sold = this.venue.seats.filter((s) => s.sold);
     const mesh = (this.peopleMesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ roughness: 0.8 }), sold.length));
-    const shirts = ['#ffffff', '#f2f2f2', '#e8e8e8', '#1c2a5a', '#7b1d2b', '#2d2d2d', '#c9a227', '#5b6b84'].map((c) => new THREE.Color(c));
+    const pal = (arr) => arr.map((c) => new THREE.Color(c));
+    const shirts = pal(['#ffffff', '#f2f2f2', '#e8e8e8', '#1c2a5a', '#7b1d2b', '#2d2d2d', '#c9a227', '#5b6b84']);
+    const away = pal(['#d0262f', '#e33a3a', '#b81d28', '#ffffff']);
+    const ultras = pal(['#ffffff', '#ffffff', '#1c2a5a', '#7b1d2b']);
     const m = new THREE.Matrix4();
     sold.forEach((s, i) => {
       const n = v3(s.normal);
       m.makeBasis(n, UP, n.clone().cross(UP));
-      m.setPosition(s.pos[0], s.pos[1], s.pos[2]);
+      // En la grada de animación están de pie
+      m.setPosition(s.pos[0], s.pos[1] + (s.standing ? 0.42 : 0), s.pos[2]);
       mesh.setMatrixAt(i, m);
-      mesh.setColorAt(i, shirts[(s.idx * 2654435761) % shirts.length]);
+      const zone = s.zone;
+      const set = zone === 'visitante' ? away : zone === 'animacion' ? ultras : shirts;
+      mesh.setColorAt(i, set[(s.idx * 2654435761) % set.length]);
     });
     this.scene.add(mesh);
   }
 
+  // Vomitorios: bocas de acceso en los pasillos, con su cartel verde de salida.
+  buildAccesses() {
+    const d = this.cfg.rowDepth;
+    const seen = new Set();
+    const holes = [], signs = [], rails = [];
+    for (const sec of this.venue.sectors) {
+      const stand = this.cfg.stands.find((st) => st.id === sec.standId);
+      // Solo dibujamos los de los pasillos interiores (los extremos son escaleras laterales)
+      const inner = sec.accessS.filter((_, i) => (i === 0 ? sec.index > 0 : sec.index < stand.sectors - 1));
+      for (const sa of inner) {
+        const key = `${sec.standId}${sec.tier}${sa.toFixed(1)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const r = sec.accessRow - 1;
+        const u = sec.uFront + r * d + d; // centro de 2 filas
+        const h = sec.h0 + r * sec.rise;
+        const o = v3(sec.frame.origin), n = v3(sec.frame.normal), t = v3(sec.frame.tangent);
+        const at = (du, dh) => o.clone().addScaledVector(n, u + du).addScaledVector(UP, h + dh).addScaledVector(t, sa);
+        const basis = new THREE.Matrix4().makeBasis(n, UP, t);
+        holes.push(basis.clone().setPosition(at(0, -0.6)));
+        signs.push(basis.clone().setPosition(at(d * 1.2, 2.3)));
+        for (const side of [-1, 1]) {
+          rails.push(basis.clone().setPosition(at(0, 0.55).addScaledVector(t, side * 0.62)));
+        }
+      }
+    }
+    const hole = new THREE.InstancedMesh(new THREE.BoxGeometry(d * 2.2, 1.3, this.cfg.aisle * 1.05),
+      new THREE.MeshStandardMaterial({ color: '#07090f', roughness: 1 }), holes.length);
+    holes.forEach((m, i) => hole.setMatrixAt(i, m));
+    const sign = new THREE.InstancedMesh(new THREE.BoxGeometry(0.1, 0.35, 0.9),
+      new THREE.MeshBasicMaterial({ color: '#2bff88' }), signs.length);
+    signs.forEach((m, i) => sign.setMatrixAt(i, m));
+    const rail = new THREE.InstancedMesh(new THREE.BoxGeometry(d * 2.2, 1.0, 0.05),
+      new THREE.MeshStandardMaterial({ color: '#c9ced8', metalness: 0.6, roughness: 0.3 }), rails.length);
+    rails.forEach((m, i) => rail.setMatrixAt(i, m));
+    this.scene.add(hole, sign, rail);
+  }
+
   buildShell() {
     // Cubierta (anillo) y fachada exterior
+    const rc = this.cfg.roof;
     const roofShape = roundedRect(new THREE.Shape(), 97, 76, 26);
-    roofShape.holes.push(roundedRect(new THREE.Path(), 72, 50, 20));
+    roofShape.holes.push(roundedRect(new THREE.Path(), rc.hx, rc.hz, rc.r));
     const roofGeo = new THREE.ExtrudeGeometry(roofShape, { depth: 1.6, bevelEnabled: false, curveSegments: 24 });
     roofGeo.rotateX(-Math.PI / 2);
     const roof = new THREE.Mesh(roofGeo, new THREE.MeshStandardMaterial({ color: '#c7ccd6', roughness: 0.5, metalness: 0.2, side: THREE.DoubleSide }));
-    roof.position.y = 34;
+    roof.position.y = rc.height;
     this.scene.add(roof);
     this.roof = roof;
     roof.visible = false; // solo se ve desde los asientos
@@ -280,7 +343,7 @@ export class StadiumScene {
     this.scene.add(wall);
 
     // Focos: anillo luminoso en el borde interior de la cubierta
-    const ringPts = roundedRect(new THREE.Path(), 72.5, 50.5, 20).getSpacedPoints(160);
+    const ringPts = roundedRect(new THREE.Path(), rc.hx + 0.5, rc.hz + 0.5, rc.r).getSpacedPoints(160);
     const lamp = new THREE.BoxGeometry(2.2, 0.5, 0.8);
     const lamps = new THREE.InstancedMesh(lamp, new THREE.MeshBasicMaterial({ color: '#fffbe8' }), ringPts.length);
     const m = new THREE.Matrix4();
@@ -310,10 +373,11 @@ export class StadiumScene {
     this.labels = [];
     for (const sec of this.venue.sectors) {
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: makeLabelTexture(sec.id, `desde ${sec.minPrice} €`), depthTest: false, transparent: true,
+        map: makeLabelTexture(sec.id, `desde ${sec.minPrice} €`, sec.zone && `${sec.zone.icon} ${sec.zone.label.replace('Junto a la afición visitante', 'Junto a visitantes')}`),
+        depthTest: false, transparent: true,
       }));
       sp.position.copy(sec.center).addScaledVector(UP, sec.tier === 'lower' ? 4 : 8);
-      sp.scale.set(10, 5, 1);
+      sp.scale.set(sec.zone ? 13 : 10, sec.zone ? 13 * 0.82 : 5, 1);
       sp.renderOrder = 10;
       this.scene.add(sp);
       this.labels.push(sp);

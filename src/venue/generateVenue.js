@@ -2,6 +2,7 @@
 // configuración. Es JS puro (sin Three.js) para poder usarlo en servidor/tests.
 
 import { scoreSeats } from '../analysis/viewScore.js';
+import { computeAmenities } from '../analysis/amenities.js';
 
 const UP = [0, 1, 0];
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -40,6 +41,9 @@ export function generateVenue(cfg, { seed = 7 } = {}) {
         const s0 = -total / 2 + j * (sectorLen + aisle);
         // Ocupación por sector: los sectores céntricos se venden más.
         const occupancy = 0.45 + 0.35 * stand.centerPremium[j] * rand();
+        // En la grada de animación se ve el partido de pie.
+        const standing = (cfg.zones || []).some((z) => z.id === 'animacion' && z.sectors.includes(id));
+        const eyeH = standing ? cfg.standingEyeHeight : cfg.eyeHeight;
 
         const sector = {
           id,
@@ -77,7 +81,7 @@ export function generateVenue(cfg, { seed = 7 } = {}) {
             const eu = u + 0.05;
             const eye = [
               edgePt[0] + n[0] * eu + t[0] * s,
-              h + cfg.eyeHeight,
+              h + eyeH,
               edgePt[2] + n[2] * eu + t[2] * s,
             ];
             const idx = seats.length;
@@ -89,6 +93,7 @@ export function generateVenue(cfg, { seed = 7 } = {}) {
               pos,
               eye,
               normal: n,
+              standing,
               price,
               sold: rand() < occupancy + rowBias,
               distCenter: Math.hypot(eye[0], eye[1], eye[2]),
@@ -120,5 +125,7 @@ export function generateVenue(cfg, { seed = 7 } = {}) {
     sec.available = avail.length;
     sec.minPrice = Math.min(...avail.map((i) => seats[i].price));
   }
-  return { cfg, sectors, seats, sectorById };
+  const venue = { cfg, sectors, seats, sectorById };
+  computeAmenities(venue);
+  return venue;
 }

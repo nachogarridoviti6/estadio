@@ -66,6 +66,21 @@ button, select { font: inherit; color: inherit; }
 .metric { background: #ffffff08; border-radius: 10px; padding: 8px; }
 .metric .v { font-weight: 700; font-size: 16px; }
 .metric .l { font-size: 11px; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.chip { font-size: 12px; padding: 4px 8px; border-radius: 999px; background: #ffffff0d; border: 1px solid var(--line); }
+.chip.good { background: #36f28f14; border-color: #36f28f40; }
+.chip.bad { background: #ff8a3c14; border-color: #ff8a3c40; }
+.tips { padding: 14px 18px 0; display: grid; gap: 10px; }
+.tip { background: #4d7cff12; border: 1px solid #4d7cff40; border-radius: 12px; padding: 12px; }
+.tip-h { font-weight: 700; font-size: 14px; }
+.tip-t { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+.tip-seat { display: flex; justify-content: space-between; gap: 10px; width: 100%; text-align: left; margin-top: 10px;
+  background: #ffffff0a; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.tip-seat:hover { border-color: var(--accent); }
+.tip-seat small { font-weight: 500; color: var(--muted); }
+.tip-seat .tp { text-align: right; white-space: nowrap; }
+.tip-seat .cheaper { color: var(--green); }
+.tip-seat .pricier { color: #ffb36b; }
 .warn { margin-top: 10px; font-size: 12px; color: #ffb36b; }
 .buy { width: 100%; margin-top: 14px; padding: 12px; border: 0; border-radius: 10px; background: var(--green);
   color: #062414; font-weight: 800; cursor: pointer; font-size: 15px; }

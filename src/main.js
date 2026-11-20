@@ -1,6 +1,6 @@
 import { STADIUM } from './venue/stadiumConfig.js';
 import { generateVenue } from './venue/generateVenue.js';
-import { findBetterDeals } from './analysis/recommend.js';
+import { findBetterDeals, findContextualTips } from './analysis/recommend.js';
 import { StadiumScene } from './scene/StadiumScene.js';
 
 const venue = generateVenue(STADIUM);
@@ -92,6 +92,7 @@ scene.on('seatClick', (seat) => {
 function selectSeat(seat, { fly = true } = {}) {
   state.seat = seat;
   state.deals = findBetterDeals(venue, seat, { quantity: state.qty, limit: 5 });
+  state.tips = findContextualTips(venue, seat, { quantity: state.qty });
   scene.focusSector = venue.sectorById[seat.sectorId];
   scene.setSelection(seat, state.deals);
   if (fly) scene.goSeat(seat);
@@ -116,18 +117,30 @@ function renderPanel() {
         <div class="metric"><div class="v">${Math.round(s.height)} m</div><div class="l">sobre el césped</div></div>
         <div class="metric"><div class="v">${Math.round(s.elevAngle)}°</div><div class="l">ángulo de visión</div></div>
       </div>
+      <div class="chips">${seatChips(s).map(([ok, icon, txt]) => `<span class="chip ${ok}">${icon} ${txt}</span>`).join('')}</div>
       ${s.underOverhang ? '<div class="warn">⚠ Bajo el voladizo de la grada superior: puedes perder balones altos.</div>' : ''}
       <button class="buy" id="buyBtn">Comprar ${state.qty > 1 ? `${state.qty} entradas` : 'entrada'} · ${eur(s.price * state.qty)}</button>
     </div>`;
   $('buyBtn').onclick = () => toast('Demo: aquí iría la pasarela de pago de la ticketera', true);
 
+  const tipsHtml = state.tips.length ? `<div class="tips">${state.tips.map((t, i) => `
+      <div class="tip">
+        <div class="tip-h">${t.icon} ${t.title}</div>
+        <div class="tip-t">${t.text}</div>
+        ${t.seat ? `<button class="tip-seat" data-tip="${i}">
+          <span>${seatTitle(t.seat)}<br><small>vista ${t.seat.rating.toFixed(1)} · ${t.seat.covered ? 'cubierto' : 'descubierto'} · acceso a ${t.seat.accessDist} m</small></span>
+          <span class="tp">${eur(t.seat.price)}<br><small class="${t.seat.price <= s.price ? 'cheaper' : 'pricier'}">${diffEur(t.seat.price - s.price)}</small></span>
+        </button>` : ''}
+      </div>`).join('')}</div>` : '';
+
   const d = state.deals;
   const deals = $('deals');
   if (!d.length) {
-    deals.innerHTML = `<div class="deals"><div class="ok">✓ <b>Buena elección.</b> No hay ningún asiento libre con una vista igual o mejor por menos dinero${state.qty > 1 ? ` para ${state.qty} personas juntas` : ''}.</div></div>`;
+    deals.innerHTML = `${tipsHtml}<div class="deals"><div class="ok">✓ <b>Buena elección.</b> No hay ningún asiento libre con una vista igual o mejor por menos dinero${state.qty > 1 ? ` para ${state.qty} personas juntas` : ''}.</div></div>`;
+    bindTips();
     return;
   }
-  deals.innerHTML = `<div class="deals">
+  deals.innerHTML = `${tipsHtml}<div class="deals">
     <h3>💡 Puedes ver lo mismo (o más) pagando menos</h3>
     <p class="lead">${d.length === 5 ? 'Las 5 mejores' : d.length} opciones con vista igual o mejor${state.qty > 1 ? ` y ${state.qty} asientos juntos` : ''}:</p>
     ${d.map((x, i) => `
@@ -143,6 +156,7 @@ function renderPanel() {
       </button>`).join('')}
   </div>`;
   deals.querySelectorAll('.deal').forEach((b) => (b.onclick = () => selectSeat(d[+b.dataset.i].seat)));
+  bindTips();
 
   // Miniaturas reales renderizadas desde cada asiento (una por frame para no bloquear)
   const imgs = [...deals.querySelectorAll('img[data-thumb]')];
@@ -153,6 +167,24 @@ function renderPanel() {
     requestAnimationFrame(next);
   };
   requestAnimationFrame(next);
+}
+
+function bindTips() {
+  $('deals').querySelectorAll('.tip-seat').forEach((b) => (b.onclick = () => selectSeat(state.tips[+b.dataset.tip].seat)));
+}
+
+const diffEur = (v) => (v === 0 ? 'mismo precio' : v < 0 ? `−${eur(-v)}` : `+${eur(v)}`);
+
+// [clase, icono, texto] de lo que hay que saber del asiento
+function seatChips(s) {
+  const sec = venue.sectorById[s.sectorId];
+  const chips = [
+    s.covered ? ['good', '☂️', 'Cubierto'] : ['bad', '🌧️', 'Al descubierto'],
+    [s.accessDist <= 12 ? 'good' : s.accessDist <= 22 ? '' : 'bad', '🚪', `Acceso a ${s.accessDist} m`],
+    [s.barDist <= 25 ? 'good' : s.barDist <= 45 ? '' : 'bad', '🍺', `Bar y aseos a ${s.barDist} m`],
+  ];
+  if (sec.zone) chips.push([sec.zone.id === 'familiar' ? 'good' : 'bad', sec.zone.icon, sec.zone.label]);
+  return chips;
 }
 
 function ratingColor(r) {

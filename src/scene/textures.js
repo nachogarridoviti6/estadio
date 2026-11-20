@@ -47,24 +47,25 @@ export function makePitchTexture(pitch, area) {
 
 export function makeBoardTexture(text) {
   const c = document.createElement('canvas');
-  c.width = 1024; c.height = 64;
+  c.width = 640; c.height = 64;
   const g = c.getContext('2d');
-  const grad = g.createLinearGradient(0, 0, 1024, 0);
+  const grad = g.createLinearGradient(0, 0, 640, 0);
   grad.addColorStop(0, '#0b1f4d'); grad.addColorStop(0.5, '#123a8c'); grad.addColorStop(1, '#0b1f4d');
-  g.fillStyle = grad; g.fillRect(0, 0, 1024, 64);
+  g.fillStyle = grad; g.fillRect(0, 0, 640, 64);
   g.fillStyle = '#ffffff';
-  g.font = 'bold 40px system-ui, sans-serif';
+  g.font = 'bold 44px system-ui, sans-serif';
   g.textBaseline = 'middle';
-  for (let x = 20; x < 1024; x += 340) g.fillText(text, x, 34);
+  g.textAlign = 'center';
+  g.fillText(text, 320, 34);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
   return tex;
 }
 
-export function makeLabelTexture(text, sub) {
+export function makeLabelTexture(text, sub, tag) {
   const c = document.createElement('canvas');
-  c.width = 256; c.height = 128;
+  c.width = 256; c.height = tag ? 210 : 128;
   const g = c.getContext('2d');
   g.fillStyle = 'rgba(10,14,26,0.82)';
   g.beginPath(); g.roundRect(8, 8, 240, 112, 22); g.fill();
@@ -75,6 +76,16 @@ export function makeLabelTexture(text, sub) {
   g.fillStyle = '#9fb3d9';
   g.font = '600 26px system-ui, sans-serif';
   g.fillText(sub, 128, 96);
+  if (tag) {
+    g.fillStyle = 'rgba(255,200,61,0.95)';
+    g.beginPath(); g.roundRect(4, 126, 248, 80, 16); g.fill();
+    g.fillStyle = '#1d1400';
+    g.font = 'bold 30px system-ui, sans-serif';
+    const words = tag.split(' ');
+    const mid = Math.ceil(words.length / 2);
+    g.fillText(words.slice(0, mid).join(' '), 128, 150);
+    g.fillText(words.slice(mid).join(' '), 128, 184);
+  }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
