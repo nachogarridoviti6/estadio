@@ -106,8 +106,8 @@ export function findContextualTips(venue, seat, { quantity = 1 } = {}) {
 
 export function hasContiguous(venue, seat, qty) {
   const sec = venue.sectorById[seat.sectorId];
-  const perRow = sec.seatIdx.length / sec.rows;
-  const rowStart = sec.seatIdx[0] + (seat.row - 1) * perRow;
+  const rowStart = sec.rowStart[seat.row - 1];
+  const perRow = sec.rowCount[seat.row - 1];
   const k = seat.number - 1;
   for (let start = Math.max(0, k - qty + 1); start <= k; start++) {
     if (start + qty > perRow) break;

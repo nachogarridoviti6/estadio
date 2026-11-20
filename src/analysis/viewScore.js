@@ -4,13 +4,14 @@
 // "grande y legible" que se ve desde los ojos del espectador:
 //   tamaño aparente ~ 1/d   (más cerca = más grande)
 //   escorzo         ~ sin(elevación)^0.3 (desde muy abajo el campo se aplana)
+//   obstrucción     ~ el peto de la grada y las cabezas de la fila de delante
 // La media sobre todo el campo premia ver bien TODO el partido, no solo una
 // portería. Además se penaliza la orientación de fondo frente a la lateral.
 
 const GX = 11, GZ = 7;
 
-export function rawViewQuality(eye, pitch) {
-  let acc = 0;
+export function rawViewQuality(eye, pitch, normal = null, blockers = [], out = null) {
+  let acc = 0, hidden = 0;
   for (let i = 0; i < GX; i++) {
     const px = -pitch.length / 2 + (pitch.length * i) / (GX - 1);
     for (let j = 0; j < GZ; j++) {
@@ -18,11 +19,25 @@ export function rawViewQuality(eye, pitch) {
       const dx = px - eye[0], dz = pz - eye[2], dy = eye[1];
       const d = Math.hypot(dx, dy, dz);
       const sinElev = dy / d;
-      acc += Math.pow(sinElev, 0.3) / d;
+      let vis = 1;
+      if (normal) {
+        // ¿El rayo hasta este punto del campo pasa por debajo de un peto o de una cabeza?
+        const hd = Math.hypot(dx, dz);
+        const cos = -(dx * normal[0] + dz * normal[2]) / hd;
+        if (cos > 0.05) {
+          for (const b of blockers) {
+            const dist = b.du / cos;
+            const lineH = eye[1] - eye[1] * (dist / hd);
+            if (lineH < b.top) { vis -= b.weight; if (b.weight >= 1) hidden++; }
+          }
+        }
+      }
+      acc += (Math.max(0, vis) * Math.pow(sinElev, 0.3)) / d;
     }
   }
   // Orientación: el fútbol se entiende mejor de lado que desde la portería
   // (desde el fondo la profundidad del campo se aplana).
+  if (out) out.hiddenFrac = hidden / (GX * GZ);
   const horiz = Math.hypot(eye[0], eye[2]) || 1;
   const side = Math.abs(eye[2]) / horiz; // 1 = lateral puro, 0 = fondo puro
   return (acc / (GX * GZ)) * (0.72 + 0.28 * side);
@@ -30,7 +45,9 @@ export function rawViewQuality(eye, pitch) {
 
 export function scoreSeats(seats, cfg) {
   const raw = seats.map((s) => {
-    let q = rawViewQuality(s.eye, cfg.pitch);
+    const info = {};
+    let q = rawViewQuality(s.eye, cfg.pitch, s.normal, s.blockers, info);
+    s.hiddenFrac = info.hiddenFrac; // parte del campo que tapa el peto
     if (s.underOverhang) q *= 0.96; // techo bajo: se pierden balones altos y algo de ambiente
     return q;
   });

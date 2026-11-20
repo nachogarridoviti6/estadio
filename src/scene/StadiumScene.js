@@ -1,35 +1,46 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { makePitchTexture, makeBoardTexture, makeLabelTexture } from './textures.js';
+
+import { buildStands, sweepProfile } from './build/stands.js';
+import { buildPitch } from './build/pitch.js';
+import { loadHumanAssets, buildCrowdAtlas } from './build/humans.js';
+import { buildCrowd } from './build/crowd.js';
+import { loadMatch } from './build/players.js';
+import { buildSky, buildRoof, buildFacade, buildUpperFill } from './build/shell.js';
+import { parapetTop } from '../venue/generateVenue.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const v3 = (a) => new THREE.Vector3(a[0], a[1], a[2]);
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const smooth = (t) => t * t * (3 - 2 * t);
 
 const COLORS = {
-  tier: { lower: new THREE.Color('#b3122e'), upper: new THREE.Color('#1e4fa3') },
-  sold: new THREE.Color('#2a2f3a'),
+  sold: new THREE.Color('#20242c'),
+  hover: new THREE.Color('#ff8a1f'),
   priceStops: ['#20b2a0', '#8bd346', '#f4c542', '#f08a3c', '#e0457b'].map((c) => new THREE.Color(c)),
   viewStops: ['#d64545', '#f08a3c', '#f0c429', '#8bd346', '#20c070'].map((c) => new THREE.Color(c)),
 };
-
 function gradient(stops, t) {
   t = Math.min(1, Math.max(0, t)) * (stops.length - 1);
   const i = Math.min(stops.length - 2, Math.floor(t));
   return stops[i].clone().lerp(stops[i + 1], t - i);
 }
 
-function roundedRect(path, hw, hd, r) {
-  path.moveTo(-hw + r, -hd);
-  path.lineTo(hw - r, -hd); path.quadraticCurveTo(hw, -hd, hw, -hd + r);
-  path.lineTo(hw, hd - r); path.quadraticCurveTo(hw, hd, hw - r, hd);
-  path.lineTo(-hw + r, hd); path.quadraticCurveTo(-hw, hd, -hw, hd - r);
-  path.lineTo(-hw, -hd + r); path.quadraticCurveTo(-hw, -hd, -hw + r, -hd);
-  return path;
-}
+const OVERVIEW = { pos: new THREE.Vector3(150, 230, 210), target: new THREE.Vector3(0, 0, 0), fov: 40 };
 
 export class StadiumScene {
+  static async create(container, venue, onProgress = () => {}) {
+    const s = new StadiumScene(container, venue);
+    await s.init(onProgress);
+    return s;
+  }
+
   constructor(container, venue) {
     this.venue = venue;
     this.cfg = venue.cfg;
@@ -39,33 +50,58 @@ export class StadiumScene {
     this.listeners = {};
     this.anim = null;
     this.hoverSector = null;
+    this.quality = window.matchMedia('(max-width: 760px)').matches ? 'low' : 'high';
+  }
 
-    const r = (this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true }));
-    r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  async init(onProgress) {
+    const r = (this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, powerPreference: 'high-performance' }));
+    r.setPixelRatio(Math.min(window.devicePixelRatio, this.quality === 'high' ? 2 : 1.5));
     r.toneMapping = THREE.ACESFilmicToneMapping;
-    r.toneMappingExposure = 1.05;
-    container.appendChild(r.domElement);
+    r.toneMappingExposure = 1.0;
+    r.shadowMap.enabled = true;
+    r.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.container.appendChild(r.domElement);
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#070b16');
-    this.scene.fog = new THREE.Fog('#070b16', 260, 520);
-
-    this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 1200);
-    this.camera.position.set(95, 185, 165);
+    this.scene.fog = new THREE.Fog('#0b0f1c', 350, 1100);
+    this.camera = new THREE.PerspectiveCamera(OVERVIEW.fov, 1, 0.3, 2500);
+    this.camera.position.copy(OVERVIEW.pos);
     this.controls = new OrbitControls(this.camera, r.domElement);
     this.controls.enableDamping = true;
     this.setOverviewControls();
 
-    this.buildLights();
-    this.buildPitch();
-    this.buildStands();
-    this.buildSeats();
-    this.buildPeople();
-    this.buildAccesses();
-    this.buildShell();
-    this.buildMarkers();
-    this.buildLabels();
+    onProgress('Cargando iluminación y texturas…', 0.1);
+    const [env, grass] = await Promise.all([
+      new RGBELoader().loadAsync('/assets/moonless_golf_1k.hdr'),
+      new THREE.TextureLoader().loadAsync('/assets/grasslight-big.jpg'),
+    ]);
+    const pmrem = new THREE.PMREMGenerator(r);
+    this.scene.environment = pmrem.fromEquirectangular(env).texture;
+    this.scene.environmentIntensity = 0.5;
+    env.dispose();
 
+    onProgress('Construyendo el estadio…', 0.3);
+    buildSky(this.scene);
+    this.buildLights();
+    buildPitch(this.cfg, this.scene, grass);
+    this.sectorMeshes = buildStands(this.venue, this.scene);
+    this.buildLedRing();
+    this.buildSeats();
+    buildUpperFill(this.venue, this.scene);
+    this.facade = buildFacade(this.cfg, this.scene);
+    this.roof = buildRoof(this.cfg, this.scene);
+    this.roof.group.visible = false;
+
+    onProgress('Creando el público…', 0.55);
+    const humans = await loadHumanAssets();
+    this.atlas = buildCrowdAtlas(r, humans);
+    this.crowd = buildCrowd(this.venue, this.atlas, this.scene);
+
+    onProgress('Saltan los jugadores al campo…', 0.8);
+    this.match = await loadMatch(this.scene);
+
+    this.buildMarkers();
+    this.buildPost();
     this.raycaster = new THREE.Raycaster();
     this.pointer = new THREE.Vector2();
     this.bindEvents();
@@ -73,6 +109,7 @@ export class StadiumScene {
     window.addEventListener('resize', () => this.resize());
     this.clock = new THREE.Clock();
     r.setAnimationLoop(() => this.tick());
+    onProgress('Listo', 1);
   }
 
   on(evt, fn) { (this.listeners[evt] ||= []).push(fn); }
@@ -80,172 +117,54 @@ export class StadiumScene {
 
   // ---------- construcción ----------
   buildLights() {
-    this.scene.add(new THREE.HemisphereLight('#c9d6ff', '#1b1e26', 1.1));
-    const key = new THREE.DirectionalLight('#ffffff', 1.6);
-    key.position.set(60, 140, 40);
-    this.scene.add(key);
-    const fill = new THREE.DirectionalLight('#9fb4ff', 0.5);
-    fill.position.set(-80, 90, -60);
-    this.scene.add(fill);
-  }
-
-  buildPitch() {
-    const { pitch } = this.cfg;
-    const area = { l: 124, w: 86 };
-    const mat = new THREE.MeshStandardMaterial({
-      map: makePitchTexture(pitch, area), roughness: 0.95,
-      emissive: '#ffffff', emissiveIntensity: 0.12,
+    this.scene.add(new THREE.HemisphereLight('#bcc8ff', '#202430', 0.55));
+    // Focos de la cubierta: cuatro direcciones, una con sombras sobre el campo
+    const rh = this.cfg.roof.height;
+    const dirs = [[0, rh, 70], [0, rh, -70], [90, rh, 0], [-90, rh, 0]];
+    dirs.forEach((p, i) => {
+      const l = new THREE.DirectionalLight('#fff6ea', i === 0 ? 1.6 : 0.9);
+      l.position.set(...p);
+      if (i === 0) {
+        l.castShadow = true;
+        const sz = this.quality === 'high' ? 4096 : 2048;
+        l.shadow.mapSize.set(sz, sz);
+        Object.assign(l.shadow.camera, { left: -75, right: 75, top: 55, bottom: -55, near: 10, far: 200 });
+        l.shadow.bias = -0.0004;
+        l.shadow.normalBias = 0.02;
+      }
+      this.scene.add(l);
     });
-    mat.emissiveMap = mat.map;
-    const grass = new THREE.Mesh(new THREE.PlaneGeometry(area.l, area.w), mat);
-    grass.rotation.x = -Math.PI / 2;
-    this.scene.add(grass);
-
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(260, 220),
-      new THREE.MeshStandardMaterial({ color: '#1d2a22', roughness: 1 }),
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = -0.05;
-    this.scene.add(ground);
-
-    // Porterías
-    const white = new THREE.MeshStandardMaterial({ color: '#ffffff', emissive: '#ffffff', emissiveIntensity: 0.3 });
-    const net = new THREE.MeshStandardMaterial({ color: '#ffffff', transparent: true, opacity: 0.18, side: THREE.DoubleSide });
-    for (const s of [-1, 1]) {
-      const g = new THREE.Group();
-      const post = new THREE.CylinderGeometry(0.06, 0.06, 2.44, 8);
-      for (const z of [-3.66, 3.66]) {
-        const m = new THREE.Mesh(post, white); m.position.set(0, 1.22, z); g.add(m);
-      }
-      const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 7.32, 8), white);
-      bar.rotation.x = Math.PI / 2; bar.position.y = 2.44; g.add(bar);
-      const box = new THREE.Mesh(new THREE.BoxGeometry(2, 2.44, 7.32), net);
-      box.position.set(s * 1, 1.22, 0); g.add(box);
-      g.position.x = s * pitch.length / 2;
-      this.scene.add(g);
-    }
-
-    // Vallas publicitarias LED
-    const boardTex = makeBoardTexture('SEATVIEW');
-    const L = pitch.length / 2 + 4, W = pitch.width / 2 + 3.5;
-    const backMat = new THREE.MeshStandardMaterial({ color: '#0b1124' });
-    const boards = [
-      [[0, 0.45, W], 2 * L, Math.PI], [[0, 0.45, -W], 2 * L, 0],
-      [[L, 0.45, 0], 2 * W, -Math.PI / 2], [[-L, 0.45, 0], 2 * W, Math.PI / 2],
-    ];
-    for (const [p, len, ry] of boards) {
-      const g = new THREE.Group();
-      // El texto se repite cada ~9 m para que no se estire en vallas largas
-      const tex = boardTex.clone();
-      tex.repeat.x = Math.round(len / 9);
-      tex.needsUpdate = true;
-      const face = new THREE.Mesh(new THREE.PlaneGeometry(len, 0.9), new THREE.MeshBasicMaterial({ map: tex }));
-      face.position.z = 0.08;
-      const back = new THREE.Mesh(new THREE.BoxGeometry(len, 0.9, 0.14), backMat);
-      g.add(face, back);
-      g.position.set(...p); g.rotation.y = ry;
-      this.scene.add(g);
-    }
-
-    // Jugadores (4-4-2 contra 4-3-3), simples pero dan escala a la vista.
-    // Jugador: piernas (pantalón) + torso (camiseta) + cabeza
-    const mkPlayer = (shirt, shorts) => {
-      const legs = new THREE.CapsuleGeometry(0.16, 0.7, 3, 8); legs.translate(0, 0.5, 0); legs.scale(1.3, 1, 1);
-      const torso = new THREE.CapsuleGeometry(0.22, 0.45, 3, 8); torso.translate(0, 1.25, 0); torso.scale(1, 1, 1.35);
-      const head = new THREE.SphereGeometry(0.12, 10, 8); head.translate(0, 1.72, 0);
-      const g = new THREE.Group();
-      g.add(new THREE.Mesh(legs, new THREE.MeshStandardMaterial({ color: shorts })));
-      g.add(new THREE.Mesh(torso, new THREE.MeshStandardMaterial({ color: shirt })));
-      g.add(new THREE.Mesh(head, new THREE.MeshStandardMaterial({ color: '#c99a76' })));
-      return g;
-    };
-    const teamA = ['#f5f5f5', '#f5f5f5'], teamB = ['#d0262f', '#1d2a5a'];
-    const A = [[-50, 0], [-36, -20], [-38, -7], [-38, 7], [-36, 20], [-18, -22], [-20, -7], [-20, 7], [-18, 22], [-4, -6], [-6, 8]];
-    const B = [[50, 0], [36, -22], [37, -8], [37, 8], [36, 22], [16, -10], [18, 0], [16, 10], [4, -20], [2, 0], [5, 19]];
-    for (const [list, [shirt, shorts]] of [[A, teamA], [B, teamB]]) {
-      list.forEach(([x, z], i) => {
-        // El portero, de otro color
-        const p = i === 0 ? mkPlayer('#2bd36b', '#111') : mkPlayer(shirt, shorts);
-        p.position.set(x, 0, z);
-        p.rotation.y = x < 0 ? Math.PI / 2 : -Math.PI / 2;
-        this.scene.add(p);
-      });
-    }
-    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 8), white);
-    ball.position.set(-1.5, 0.22, 4);
-    this.scene.add(ball);
   }
 
-  frameMatrix(frame, sOffset = 0) {
-    const n = v3(frame.normal), t = v3(frame.tangent);
-    const m = new THREE.Matrix4().makeBasis(n, UP, t);
-    const o = v3(frame.origin).addScaledVector(t, sOffset);
-    m.setPosition(o);
-    return m;
-  }
-
-  stepShape(sec) {
-    const d = this.cfg.rowDepth;
-    const base = sec.tier === 'lower' ? 0 : sec.h0 - 2.6;
-    const s = new THREE.Shape();
-    s.moveTo(sec.uFront, base);
-    s.lineTo(sec.uFront, sec.h0);
-    for (let r = 0; r < sec.rows; r++) {
-      const h = sec.h0 + r * sec.rise;
-      s.lineTo(sec.uFront + (r + 1) * d, h);
-      if (r < sec.rows - 1) s.lineTo(sec.uFront + (r + 1) * d, h + sec.rise);
-    }
-    const uBack = sec.uFront + sec.rows * d;
-    const hLast = sec.h0 + (sec.rows - 1) * sec.rise;
-    s.lineTo(uBack, hLast + 1.3);
-    s.lineTo(uBack + 0.6, hLast + 1.3);
-    s.lineTo(uBack + 0.6, base);
-    s.lineTo(sec.uFront, base);
-    return s;
-  }
-
-  buildStands() {
-    this.sectorMeshes = [];
-    this.standMat = new THREE.MeshStandardMaterial({ color: '#8a909c', roughness: 0.9 });
-    const aisleMat = new THREE.MeshStandardMaterial({ color: '#6c717c', roughness: 0.9 });
-    const aisle = this.cfg.aisle;
-
-    for (const sec of this.venue.sectors) {
-      const shape = this.stepShape(sec);
-      const len = sec.sRange[1] - sec.sRange[0];
-      const geo = new THREE.ExtrudeGeometry(shape, { depth: len, bevelEnabled: false });
-      geo.applyMatrix4(this.frameMatrix(sec.frame, sec.sRange[0]));
-      const mat = this.standMat.clone();
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.userData.sector = sec;
-      sec.mesh = mesh;
-      this.scene.add(mesh);
-      this.sectorMeshes.push(mesh);
-
-      // Pasillo a la derecha de cada sector (salvo el último del lateral)
-      const stand = this.cfg.stands.find((s) => s.id === sec.standId);
-      if (sec.index < stand.sectors - 1) {
-        const ag = new THREE.ExtrudeGeometry(shape, { depth: aisle, bevelEnabled: false });
-        ag.applyMatrix4(this.frameMatrix(sec.frame, sec.sRange[1]));
-        this.scene.add(new THREE.Mesh(ag, aisleMat));
-      }
-      // Centro del sector para cámara y etiquetas
-      const uMid = sec.uFront + (sec.rows * this.cfg.rowDepth) / 2;
-      const hMid = sec.h0 + (sec.rows * sec.rise) / 2;
-      const sMid = (sec.sRange[0] + sec.sRange[1]) / 2;
-      sec.center = v3(sec.frame.origin)
-        .addScaledVector(v3(sec.frame.normal), uMid)
-        .addScaledVector(UP, hMid)
-        .addScaledVector(v3(sec.frame.tangent), sMid);
-    }
+  // Anillo LED en el peto del primer anfiteatro
+  buildLedRing() {
+    const t = this.cfg.tiers[1];
+    const top = parapetTop(this.cfg, t);
+    const prof = [[t.u0 - 0.36, top - 2], [t.u0 - 0.31, top - 2], [t.u0 - 0.31, top - 0.05], [t.u0 - 0.36, top - 0.05]];
+    const c = this.venue.contour;
+    const geo = sweepProfile(c, 0, c.length, prof, { stepLine: 2, stepCorner: 0.7 });
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024; canvas.height = 64;
+    const g = canvas.getContext('2d');
+    const grd = g.createLinearGradient(0, 0, 1024, 0);
+    grd.addColorStop(0, '#0b2a6b'); grd.addColorStop(0.5, '#1e5bd8'); grd.addColorStop(1, '#0b2a6b');
+    g.fillStyle = grd; g.fillRect(0, 0, 1024, 64);
+    g.fillStyle = '#fff'; g.font = 'bold 40px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText('SEATVIEW  ·  TU VISTA ANTES DE COMPRAR', 512, 34);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.repeat.set(1 / 15, 1);
+    this.ledTex = tex;
+    this.scene.add(new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(1.4, 1.4, 1.4) })));
   }
 
   buildSeats() {
-    const pan = new THREE.BoxGeometry(0.44, 0.08, 0.44); pan.translate(0, 0.42, 0);
-    const back = new THREE.BoxGeometry(0.06, 0.5, 0.44); back.translate(0.21, 0.68, 0);
-    const geo = mergeGeometries([pan, back]);
-    const mat = new THREE.MeshStandardMaterial({ roughness: 0.6 });
+    const pan = new THREE.BoxGeometry(0.44, 0.06, 0.44); pan.translate(0, 0.44, 0);
+    const back = new THREE.BoxGeometry(0.05, 0.42, 0.42); back.rotateZ(-0.12); back.translate(0.22, 0.7, 0);
+    const leg = new THREE.BoxGeometry(0.05, 0.4, 0.05); leg.translate(0.12, 0.2, 0);
+    const geo = mergeGeometries([pan, back, leg]);
+    const mat = new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.05 });
     const seats = this.venue.seats;
     const mesh = (this.seatMesh = new THREE.InstancedMesh(geo, mat, seats.length));
     const m = new THREE.Matrix4();
@@ -255,174 +174,154 @@ export class StadiumScene {
       m.setPosition(s.pos[0], s.pos[1], s.pos[2]);
       mesh.setMatrixAt(s.idx, m);
     }
+    mesh.receiveShadow = true;
     this.scene.add(mesh);
     this.applyColors();
   }
 
-  buildPeople() {
-    const body = new THREE.CapsuleGeometry(0.15, 0.32, 3, 8); body.scale(1, 1, 1.25); body.translate(0.08, 0.72, 0);
-    const head = new THREE.IcosahedronGeometry(0.095, 1); head.translate(0.04, 1.08, 0);
-    for (const g of [body, head]) g.deleteAttribute('uv');
-    const geo = mergeGeometries([body.toNonIndexed(), head]);
-    const sold = this.venue.seats.filter((s) => s.sold);
-    const mesh = (this.peopleMesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ roughness: 0.8 }), sold.length));
-    const pal = (arr) => arr.map((c) => new THREE.Color(c));
-    const shirts = pal(['#ffffff', '#f2f2f2', '#e8e8e8', '#1c2a5a', '#7b1d2b', '#2d2d2d', '#c9a227', '#5b6b84']);
-    const away = pal(['#d0262f', '#e33a3a', '#b81d28', '#ffffff']);
-    const ultras = pal(['#ffffff', '#ffffff', '#1c2a5a', '#7b1d2b']);
-    const m = new THREE.Matrix4();
-    sold.forEach((s, i) => {
-      const n = v3(s.normal);
-      m.makeBasis(n, UP, n.clone().cross(UP));
-      // En la grada de animación están de pie
-      m.setPosition(s.pos[0], s.pos[1] + (s.standing ? 0.42 : 0), s.pos[2]);
-      mesh.setMatrixAt(i, m);
-      const zone = s.zone;
-      const set = zone === 'visitante' ? away : zone === 'animacion' ? ultras : shirts;
-      mesh.setColorAt(i, set[(s.idx * 2654435761) % set.length]);
-    });
-    this.scene.add(mesh);
-  }
-
-  // Vomitorios: bocas de acceso en los pasillos, con su cartel verde de salida.
-  buildAccesses() {
-    const d = this.cfg.rowDepth;
-    const seen = new Set();
-    const holes = [], signs = [], rails = [];
-    for (const sec of this.venue.sectors) {
-      const stand = this.cfg.stands.find((st) => st.id === sec.standId);
-      // Solo dibujamos los de los pasillos interiores (los extremos son escaleras laterales)
-      const inner = sec.accessS.filter((_, i) => (i === 0 ? sec.index > 0 : sec.index < stand.sectors - 1));
-      for (const sa of inner) {
-        const key = `${sec.standId}${sec.tier}${sa.toFixed(1)}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const r = sec.accessRow - 1;
-        const u = sec.uFront + r * d + d; // centro de 2 filas
-        const h = sec.h0 + r * sec.rise;
-        const o = v3(sec.frame.origin), n = v3(sec.frame.normal), t = v3(sec.frame.tangent);
-        const at = (du, dh) => o.clone().addScaledVector(n, u + du).addScaledVector(UP, h + dh).addScaledVector(t, sa);
-        const basis = new THREE.Matrix4().makeBasis(n, UP, t);
-        holes.push(basis.clone().setPosition(at(0, -0.6)));
-        signs.push(basis.clone().setPosition(at(d * 1.2, 2.3)));
-        for (const side of [-1, 1]) {
-          rails.push(basis.clone().setPosition(at(0, 0.55).addScaledVector(t, side * 0.62)));
-        }
-      }
+  // Asientos detallados (abatibles, respaldo curvo, patas) alrededor del
+  // espectador. Sustituyen a los simplificados solo donde se ven de cerca.
+  buildDetailSeats() {
+    const parts = [];
+    const pan = new THREE.BoxGeometry(0.42, 0.045, 0.43); pan.translate(-0.02, 0.43, 0); parts.push(pan);
+    const lip = new THREE.CylinderGeometry(0.025, 0.025, 0.43, 8); lip.rotateX(Math.PI / 2); lip.translate(-0.23, 0.43, 0); parts.push(lip);
+    const back = new THREE.CylinderGeometry(0.9, 0.9, 0.44, 16, 1, true, -0.25, 0.5);
+    back.rotateY(Math.PI / 2); back.translate(-0.68, 0, 0); back.rotateZ(-0.16); back.translate(0.21, 0.72, 0);
+    parts.push(back);
+    const backThick = new THREE.BoxGeometry(0.03, 0.44, 0.44); backThick.rotateZ(-0.16); backThick.translate(0.235, 0.72, 0); parts.push(backThick);
+    for (const z of [-0.24, 0.24]) {
+      const arm = new THREE.BoxGeometry(0.36, 0.035, 0.045); arm.translate(0.02, 0.62, z); parts.push(arm);
+      const post = new THREE.BoxGeometry(0.04, 0.6, 0.04); post.translate(0.14, 0.3, z); parts.push(post);
     }
-    const hole = new THREE.InstancedMesh(new THREE.BoxGeometry(d * 2.2, 1.3, this.cfg.aisle * 1.05),
-      new THREE.MeshStandardMaterial({ color: '#07090f', roughness: 1 }), holes.length);
-    holes.forEach((m, i) => hole.setMatrixAt(i, m));
-    const sign = new THREE.InstancedMesh(new THREE.BoxGeometry(0.1, 0.35, 0.9),
-      new THREE.MeshBasicMaterial({ color: '#2bff88' }), signs.length);
-    signs.forEach((m, i) => sign.setMatrixAt(i, m));
-    const rail = new THREE.InstancedMesh(new THREE.BoxGeometry(d * 2.2, 1.0, 0.05),
-      new THREE.MeshStandardMaterial({ color: '#c9ced8', metalness: 0.6, roughness: 0.3 }), rails.length);
-    rails.forEach((m, i) => rail.setMatrixAt(i, m));
-    this.scene.add(hole, sign, rail);
+    for (const p of parts) { if (p.index) p.toNonIndexed(); }
+    const geo = mergeGeometries(parts.map((p) => (p.index ? p.toNonIndexed() : p)));
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshPhysicalMaterial({ color: '#ffffff', roughness: 0.35, clearcoat: 0.6, clearcoatRoughness: 0.3, side: THREE.DoubleSide });
+    this.detailSeats = new THREE.InstancedMesh(geo, mat, 2500);
+    this.detailSeats.count = 0;
+    this.detailSeats.receiveShadow = true;
+    this.scene.add(this.detailSeats);
+    this.hiddenSeats = [];
   }
 
-  buildShell() {
-    // Cubierta (anillo) y fachada exterior
-    const rc = this.cfg.roof;
-    const roofShape = roundedRect(new THREE.Shape(), 97, 76, 26);
-    roofShape.holes.push(roundedRect(new THREE.Path(), rc.hx, rc.hz, rc.r));
-    const roofGeo = new THREE.ExtrudeGeometry(roofShape, { depth: 1.6, bevelEnabled: false, curveSegments: 24 });
-    roofGeo.rotateX(-Math.PI / 2);
-    const roof = new THREE.Mesh(roofGeo, new THREE.MeshStandardMaterial({ color: '#c7ccd6', roughness: 0.5, metalness: 0.2, side: THREE.DoubleSide }));
-    roof.position.y = rc.height;
-    this.scene.add(roof);
-    this.roof = roof;
-    roof.visible = false; // solo se ve desde los asientos
-
-    const wallShape = roundedRect(new THREE.Shape(), 97, 76, 26);
-    wallShape.holes.push(roundedRect(new THREE.Path(), 96, 75, 25));
-    const wallGeo = new THREE.ExtrudeGeometry(wallShape, { depth: 34, bevelEnabled: false, curveSegments: 24 });
-    wallGeo.rotateX(-Math.PI / 2);
-    const wall = new THREE.Mesh(wallGeo, new THREE.MeshStandardMaterial({ color: '#3b4252', roughness: 0.8, side: THREE.DoubleSide }));
-    this.scene.add(wall);
-
-    // Focos: anillo luminoso en el borde interior de la cubierta
-    const ringPts = roundedRect(new THREE.Path(), rc.hx + 0.5, rc.hz + 0.5, rc.r).getSpacedPoints(160);
-    const lamp = new THREE.BoxGeometry(2.2, 0.5, 0.8);
-    const lamps = new THREE.InstancedMesh(lamp, new THREE.MeshBasicMaterial({ color: '#fffbe8' }), ringPts.length);
+  showDetailSeats(seat) {
+    if (!this.detailSeats) this.buildDetailSeats();
     const m = new THREE.Matrix4();
-    ringPts.forEach((p, i) => { m.makeTranslation(p.x, -0.3, -p.y); lamps.setMatrixAt(i, m); });
-    this.roof.add(lamps); // los focos van con la cubierta
+    // Restaurar los simplificados ocultos
+    for (const i of this.hiddenSeats) {
+      const s = this.venue.seats[i];
+      const n = v3(s.normal);
+      m.makeBasis(n, UP, n.clone().cross(UP)).setPosition(s.pos[0], s.pos[1], s.pos[2]);
+      this.seatMesh.setMatrixAt(i, m);
+    }
+    this.hiddenSeats = [];
+    this.detailSeats.count = 0;
+    if (seat) {
+      const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+      const e = seat.eye;
+      for (const s of this.venue.seats) {
+        if (this.detailSeats.count >= 2500) break;
+        const dx = s.pos[0] - e[0], dy = s.pos[1] - e[1], dz = s.pos[2] - e[2];
+        if (dx * dx + dy * dy + dz * dz > 22 * 22) continue;
+        const n = v3(s.normal);
+        m.makeBasis(n, UP, n.clone().cross(UP)).setPosition(s.pos[0], s.pos[1], s.pos[2]);
+        this.detailSeats.setMatrixAt(this.detailSeats.count, m);
+        this.detailSeats.setColorAt(this.detailSeats.count, this.seatColor(s));
+        this.detailSeats.count++;
+        this.seatMesh.setMatrixAt(s.idx, zero);
+        this.hiddenSeats.push(s.idx);
+      }
+      this.detailSeats.instanceMatrix.needsUpdate = true;
+      if (this.detailSeats.instanceColor) this.detailSeats.instanceColor.needsUpdate = true;
+    }
+    this.seatMesh.instanceMatrix.needsUpdate = true;
   }
 
   buildMarkers() {
-    const beacon = new THREE.ConeGeometry(0.9, 2.2, 16); beacon.rotateX(Math.PI);
-    this.selMarker = new THREE.Mesh(beacon, new THREE.MeshBasicMaterial({ color: '#36f28f' }));
-    this.selMarker.visible = false;
-    this.scene.add(this.selMarker);
-    this.recoMarkers = [];
-    for (let i = 0; i < 8; i++) {
-      const mk = new THREE.Mesh(beacon, new THREE.MeshBasicMaterial({ color: '#ffc83d' }));
-      mk.visible = false;
-      this.scene.add(mk);
-      this.recoMarkers.push(mk);
-    }
-    const hov = new THREE.BoxGeometry(0.55, 0.12, 0.55);
-    this.hoverMarker = new THREE.Mesh(hov, new THREE.MeshBasicMaterial({ color: '#ffffff' }));
+    // Haz de luz sobre el asiento elegido (como en el vídeo de San Siro)
+    const beamGeo = new THREE.CylinderGeometry(0.45, 0.45, 60, 24, 1, true);
+    beamGeo.translate(0, 30, 0);
+    const beamMat = (color) => new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      uniforms: { uColor: { value: new THREE.Color(color) }, uTime: { value: 0 }, uFade: { value: 1 } },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }',
+      fragmentShader: `uniform vec3 uColor; uniform float uTime; uniform float uFade; varying vec2 vUv;
+        void main(){ float a = uFade * pow(1.0 - vUv.y, 2.2) * (0.75 + 0.25 * sin(uTime * 4.0 - vUv.y * 20.0));
+          gl_FragColor = vec4(uColor * 2.5 * a, a); }`,
+    });
+    const glowSeat = new THREE.BoxGeometry(0.6, 0.9, 0.6); glowSeat.translate(0, 0.45, 0);
+    const mk = (color, scale) => {
+      const g = new THREE.Group();
+      const beam = new THREE.Mesh(beamGeo, beamMat(color));
+      beam.scale.set(scale, scale, scale);
+      const seat = new THREE.Mesh(glowSeat, new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(3), transparent: true, opacity: 0.85 }));
+      g.add(beam, seat);
+      g.visible = false;
+      g.userData.beam = beam;
+      g.userData.glow = seat;
+      this.scene.add(g);
+      return g;
+    };
+    this.selMarker = mk('#36f28f', 1);
+    this.recoMarkers = Array.from({ length: 6 }, () => mk('#ffc83d', 0.6));
+    this.hoverMarker = new THREE.Mesh(glowSeat, new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffffff').multiplyScalar(2), transparent: true, opacity: 0.7 }));
     this.hoverMarker.visible = false;
     this.scene.add(this.hoverMarker);
   }
 
-  buildLabels() {
-    this.labels = [];
-    for (const sec of this.venue.sectors) {
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({
-        map: makeLabelTexture(sec.id, `desde ${sec.minPrice} €`, sec.zone && `${sec.zone.icon} ${sec.zone.label.replace('Junto a la afición visitante', 'Junto a visitantes')}`),
-        depthTest: false, transparent: true,
-      }));
-      sp.position.copy(sec.center).addScaledVector(UP, sec.tier === 'lower' ? 4 : 8);
-      sp.scale.set(sec.zone ? 13 : 10, sec.zone ? 13 * 0.82 : 5, 1);
-      sp.renderOrder = 10;
-      this.scene.add(sp);
-      this.labels.push(sp);
-    }
+  buildPost() {
+    const size = new THREE.Vector2();
+    this.renderer.getDrawingBufferSize(size);
+    const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: this.quality === 'high' ? 4 : 0 });
+    this.composer = new EffectComposer(this.renderer, rt);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.55, 0.5, 0.92);
+    this.composer.addPass(this.bloom);
+    this.composer.addPass(new OutputPass());
   }
 
   // ---------- color ----------
   setColorMode(mode) { this.colorMode = mode; this.applyColors(); }
 
+  seatColor(s) {
+    if (this.colorMode === 'stadium') return new THREE.Color(this.cfg.seatColor);
+    if (s.sold) return COLORS.sold;
+    if (this.colorMode === 'price') return gradient(COLORS.priceStops, (s.price - this.pMin) / (this.pMax - this.pMin));
+    return gradient(COLORS.viewStops, (s.rating - 3) / 7);
+  }
+
   applyColors() {
     const seats = this.venue.seats;
-    const prices = seats.map((s) => s.price);
-    const pMin = Math.min(...prices), pMax = Math.max(...prices);
-    for (const s of seats) {
-      let c;
-      if (s.sold && this.colorMode !== 'stadium') c = COLORS.sold;
-      else if (this.colorMode === 'price') c = gradient(COLORS.priceStops, (s.price - pMin) / (pMax - pMin));
-      else if (this.colorMode === 'view') c = gradient(COLORS.viewStops, (s.rating - 3) / 7);
-      else c = COLORS.tier[this.venue.sectorById[s.sectorId].tier];
-      this.seatMesh.setColorAt(s.idx, c);
+    if (this.pMin === undefined) {
+      const p = seats.map((s) => s.price);
+      this.pMin = Math.min(...p); this.pMax = Math.max(...p);
     }
+    for (const s of seats) this.seatMesh.setColorAt(s.idx, this.seatColor(s));
     this.seatMesh.instanceColor.needsUpdate = true;
+    // En los mapas de calor se oculta el público para ver bien los colores
+    if (this.crowd) this.crowd.visible = this.colorMode === 'stadium' || this.mode === 'seat';
+  }
+
+  tintSector(sec, on) {
+    for (const i of sec.seatIdx) this.seatMesh.setColorAt(i, on ? COLORS.hover : this.seatColor(this.venue.seats[i]));
+    this.seatMesh.instanceColor.needsUpdate = true;
+    sec.mesh.material.emissive.set(on ? '#7a3500' : '#000000');
   }
 
   // ---------- selección ----------
   setSelection(seat, recos = []) {
-    const place = (mk, s, lift) => {
-      mk.visible = true;
-      mk.position.set(s.pos[0], s.pos[1] + lift, s.pos[2]);
-      mk.userData.baseY = mk.position.y;
-    };
+    const place = (mk, s) => { mk.visible = true; mk.position.set(s.pos[0], s.pos[1], s.pos[2]); };
     this.selMarker.visible = false;
-    if (seat) place(this.selMarker, seat, 3);
-    this.recoMarkers.forEach((mk, i) => {
-      mk.visible = false;
-      if (recos[i]) place(mk, recos[i].seat, 3);
-    });
+    if (seat && this.mode !== 'seat') place(this.selMarker, seat);
+    if (seat) this.selMarker.position.set(seat.pos[0], seat.pos[1], seat.pos[2]);
+    this.recoMarkers.forEach((mk, i) => { mk.visible = false; if (recos[i]) place(mk, recos[i].seat); });
   }
 
   // ---------- cámara ----------
   setOverviewControls() {
-    const c = this.controls;
-    Object.assign(c, {
+    Object.assign(this.controls, {
       enableZoom: true, enablePan: false, rotateSpeed: 0.6,
-      minDistance: 60, maxDistance: 340, minPolarAngle: 0.15, maxPolarAngle: Math.PI * 0.46,
+      minDistance: 90, maxDistance: 520, minPolarAngle: 0.12, maxPolarAngle: Math.PI * 0.42,
       minAzimuthAngle: -Infinity, maxAzimuthAngle: Infinity,
     });
   }
@@ -430,96 +329,133 @@ export class StadiumScene {
   setSeatControls(eye, look) {
     const c = this.controls;
     const dir = look.clone().sub(eye).normalize();
-    // Objetivo pegado a los ojos => arrastrar = girar la cabeza.
     c.target.copy(eye).addScaledVector(dir, 0.1);
     const back = eye.clone().sub(c.target);
     const az = Math.atan2(back.x, back.z);
     Object.assign(c, {
       enableZoom: false, enablePan: false, rotateSpeed: -0.35,
       minDistance: 0, maxDistance: Infinity,
-      minPolarAngle: Math.PI * 0.12, maxPolarAngle: Math.PI * 0.58,
-      minAzimuthAngle: az - 1.3, maxAzimuthAngle: az + 1.3,
+      minPolarAngle: Math.PI * 0.15, maxPolarAngle: Math.PI * 0.62,
+      minAzimuthAngle: az - 1.4, maxAzimuthAngle: az + 1.4,
     });
   }
 
-  flyTo(pos, target, { duration = 1.6, fov = 42, arc = 0, onDone } = {}) {
-    const from = { pos: this.camera.position.clone(), target: this.controls.target.clone(), fov: this.camera.fov };
-    const ctrl = from.pos.clone().lerp(pos, 0.5).addScaledVector(UP, arc);
+  // Vuelo genérico: posición por curva, orientación por función
+  fly({ points, lookAt, duration, fov, onDone }) {
+    const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
     this.controls.enabled = false;
-    this.anim = { t: 0, duration, from, to: { pos, target, fov }, ctrl, onDone };
+    this.anim = { t: 0, duration, curve, lookAt, fov0: this.camera.fov, fov1: fov, onDone };
+  }
+
+  flyTo(pos, target, { duration = 1.8, fov = 42, onDone } = {}) {
+    const p0 = this.camera.position.clone();
+    const t0 = this.controls.target.clone();
+    const mid = p0.clone().lerp(pos, 0.5).addScaledVector(UP, p0.distanceTo(pos) * 0.15);
+    this.fly({ points: [p0, mid, pos], duration, fov, onDone, lookAt: (k) => t0.clone().lerp(target, smooth(k)) });
+    this.anim.finalTarget = target.clone();
   }
 
   goOverview() {
+    this.showDetailSeats(null);
     this.mode = 'overview';
+    this.roof.group.visible = false;
+    this.crowd.visible = this.colorMode === 'stadium';
     this.setOverviewControls();
-    this.setLabelsVisible(true);
-    this.flyTo(new THREE.Vector3(95, 185, 165), new THREE.Vector3(0, 0, 0), { fov: 42 });
+    this.flyTo(OVERVIEW.pos.clone(), OVERVIEW.target.clone(), { fov: OVERVIEW.fov, duration: 2 });
     this.emit('mode', this.mode);
   }
 
   goSector(sec) {
+    this.showDetailSeats(null);
     this.mode = 'sector';
     this.focusSector = sec;
-    this.setLabelsVisible(false);
-    const n = v3(sec.frame.normal);
-    const pos = sec.center.clone().addScaledVector(n, -38).addScaledVector(UP, 10);
+    this.roof.group.visible = false;
+    this.crowd.visible = this.colorMode === 'stadium';
+    const mid = this.venue.seats[sec.seatIdx[Math.floor(sec.seatIdx.length / 2)]];
+    const center = v3(mid.pos);
+    const n = v3(mid.normal);
+    const pos = center.clone().addScaledVector(n, -42).addScaledVector(UP, 16);
     this.setOverviewControls();
-    this.flyTo(pos, sec.center.clone(), {
-      fov: 45,
-      onDone: () => Object.assign(this.controls, { minDistance: 15, maxDistance: 90 }),
+    this.flyTo(pos, center, {
+      fov: 45, duration: 2,
+      onDone: () => Object.assign(this.controls, { minDistance: 15, maxDistance: 120 }),
     });
     this.emit('mode', this.mode);
   }
 
+  // Vuelo cinematográfico hasta el asiento: sube sobre el campo, baja hacia la
+  // grada mirando al asiento y, al llegar, gira para mirar al campo.
   goSeat(seat) {
-    const wasSeat = this.mode === 'seat';
+    const fromSeat = this.mode === 'seat';
     this.mode = 'seat';
-    this.setLabelsVisible(false);
+    this.crowd.visible = true;
     const eye = v3(seat.eye);
-    const look = new THREE.Vector3(seat.eye[0] * 0.15, 0, seat.eye[2] * 0.15);
-    const dir = look.clone().sub(eye).normalize();
-    this.flyTo(eye, eye.clone().addScaledVector(dir, 0.1), {
-      fov: 62, duration: wasSeat ? 2.2 : 1.8, arc: wasSeat ? 30 : 0,
-      onDone: () => this.setSeatControls(eye, look),
+    const n = v3(seat.normal);
+    const look = new THREE.Vector3(seat.eye[0] * 0.12, 0, seat.eye[2] * 0.12);
+    const p0 = this.camera.position.clone();
+    const high = new THREE.Vector3(eye.x * 0.45, Math.max(eye.y + 30, 75), eye.z * 0.45);
+    const approach = eye.clone().addScaledVector(n, -16).addScaledVector(UP, 5);
+    const near = eye.clone().addScaledVector(n, -3).addScaledVector(UP, 1.2);
+    const points = fromSeat
+      ? [p0, p0.clone().addScaledVector(UP, 25).lerp(high, 0.5), approach, near, eye]
+      : [p0, high, approach, near, eye];
+    const behind = eye.clone().addScaledVector(n, 8);
+    const t0 = this.controls.target.clone();
+    const qA = new THREE.Quaternion(), qB = new THREE.Quaternion();
+    const tmp = new THREE.PerspectiveCamera(); // lookAt de cámara (mira hacia -Z)
+    this.selMarker.visible = true;
+    this.selMarker.position.set(seat.pos[0], seat.pos[1], seat.pos[2]);
+    this.fly({
+      points, duration: fromSeat ? 3.2 : 3.8, fov: 62,
+      lookAt: (k, pos) => {
+        const tgt = k < 0.2 ? t0.clone().lerp(eye, smooth(k / 0.2)) : (pos.distanceTo(eye) > 6 ? eye : behind);
+        tmp.position.copy(pos); tmp.lookAt(tgt); qA.copy(tmp.quaternion);
+        if (k < 0.78) return qA;
+        tmp.position.copy(eye); tmp.lookAt(look); qB.copy(tmp.quaternion);
+        return qA.slerp(qB, smooth((k - 0.78) / 0.22));
+      },
+      onDone: () => {
+        this.showDetailSeats(seat);
+        this.setSeatControls(eye, look);
+        this.roof.group.visible = true;
+        this.selMarker.visible = false;
+      },
     });
+    this.anim.showRoofAt = 0.55;
+    this.anim.finalTarget = eye.clone().addScaledVector(look.clone().sub(eye).normalize(), 0.1);
     this.emit('mode', this.mode);
   }
 
-  setLabelsVisible(v) {
-    this.labels.forEach((l) => (l.visible = v));
-    this.roof.visible = !v && this.mode === 'seat';
-  }
-
-  // Vista previa en miniatura de un asiento (para la lista de recomendaciones)
+  // Miniatura de la vista desde un asiento (sin postprocesado)
   renderThumb(seat, w = 320, h = 180) {
     if (!this.thumbRT) {
-      this.thumbRT = new THREE.WebGLRenderTarget(w, h, { colorSpace: THREE.SRGBColorSpace });
-      this.thumbCam = new THREE.PerspectiveCamera(62, w / h, 0.1, 1200);
+      this.thumbRT = new THREE.WebGLRenderTarget(w, h, { samples: 4 });
+      this.thumbRT.texture.colorSpace = THREE.SRGBColorSpace;
+      this.thumbCam = new THREE.PerspectiveCamera(62, w / h, 0.1, 2500);
       this.thumbBuf = new Uint8Array(w * h * 4);
+      this.thumbCanvas = document.createElement('canvas');
+      this.thumbCanvas.width = w; this.thumbCanvas.height = h;
     }
     const cam = this.thumbCam;
     cam.position.set(...seat.eye);
-    cam.lookAt(seat.eye[0] * 0.15, 0, seat.eye[2] * 0.15);
-    const hidden = [this.selMarker, ...this.recoMarkers, this.hoverMarker, ...this.labels].filter((o) => o.visible);
-    hidden.forEach((o) => (o.visible = false));
-    const roofWas = this.roof.visible;
-    this.roof.visible = true;
+    cam.lookAt(seat.eye[0] * 0.12, 0, seat.eye[2] * 0.12);
+    const toggled = [this.selMarker, ...this.recoMarkers, this.hoverMarker].filter((o) => o.visible);
+    toggled.forEach((o) => (o.visible = false));
+    const roofWas = this.roof.group.visible, crowdWas = this.crowd.visible;
+    this.roof.group.visible = true; this.crowd.visible = true;
     this.renderer.setRenderTarget(this.thumbRT);
     this.renderer.render(this.scene, cam);
     this.renderer.readRenderTargetPixels(this.thumbRT, 0, 0, w, h, this.thumbBuf);
     this.renderer.setRenderTarget(null);
-    hidden.forEach((o) => (o.visible = true));
-    this.roof.visible = roofWas;
-
-    const c = document.createElement('canvas');
-    c.width = w; c.height = h;
-    const ctx = c.getContext('2d');
+    toggled.forEach((o) => (o.visible = true));
+    this.roof.group.visible = roofWas; this.crowd.visible = crowdWas;
+    const ctx = this.thumbCanvas.getContext('2d');
     const img = ctx.createImageData(w, h);
     for (let y = 0; y < h; y++) {
       img.data.set(this.thumbBuf.subarray((h - 1 - y) * w * 4, (h - y) * w * 4), y * w * 4);
     }
     ctx.putImageData(img, 0, 0);
-    return c.toDataURL('image/jpeg', 0.8);
+    return this.thumbCanvas.toDataURL('image/jpeg', 0.82);
   }
 
   // ---------- interacción ----------
@@ -542,13 +478,18 @@ export class StadiumScene {
     const hit = this.raycaster.intersectObjects(this.sectorMeshes, false)[0];
     if (!hit) return null;
     const sec = hit.object.userData.sector;
-    const p = hit.point.clone().sub(v3(sec.frame.origin));
-    const u = p.dot(v3(sec.frame.normal));
-    const s = p.dot(v3(sec.frame.tangent));
-    const row = Math.min(sec.rows - 1, Math.max(0, Math.floor((u - sec.uFront) / this.cfg.rowDepth)));
-    const perRow = sec.seatIdx.length / sec.rows;
-    const k = Math.min(perRow - 1, Math.max(0, Math.floor((s - sec.sRange[0]) / this.cfg.seatWidth)));
-    return { sector: sec, seat: this.venue.seats[sec.seatIdx[row * perRow + k]] };
+    const { s, u } = this.venue.contour.project(hit.point.x, hit.point.z);
+    const row = Math.min(sec.rows - 1, Math.max(0, Math.floor((u - sec.u0) / sec.rowDepth)));
+    const start = sec.rowStart[row], count = sec.rowCount[row];
+    const L = this.venue.contour.length;
+    let best = null, bd = Infinity;
+    for (let k = 0; k < count; k++) {
+      const seat = this.venue.seats[start + k];
+      let d = Math.abs((((seat.s % L) + L) % L) - s);
+      d = Math.min(d, L - d);
+      if (d < bd) { bd = d; best = seat; }
+    }
+    return { sector: sec, seat: best };
   }
 
   onHover(e) {
@@ -556,23 +497,23 @@ export class StadiumScene {
     const hit = this.pick(e);
     const sec = hit?.sector || null;
     if (sec !== this.hoverSector) {
-      if (this.hoverSector) this.hoverSector.mesh.material.emissive.set('#000000');
-      if (sec && this.mode === 'overview') sec.mesh.material.emissive.set('#3a5bd0');
+      if (this.hoverSector) this.tintSector(this.hoverSector, false);
+      if (sec && this.mode === 'overview') this.tintSector(sec, true);
       this.hoverSector = sec;
     }
     const seatLevel = this.mode !== 'overview' && hit;
     this.hoverMarker.visible = !!seatLevel;
     if (seatLevel) {
       const s = hit.seat;
-      this.hoverMarker.position.set(s.pos[0], s.pos[1] + 0.95, s.pos[2]);
-      this.hoverMarker.material.color.set(s.sold ? '#ff5a5a' : '#ffffff');
+      this.hoverMarker.position.set(s.pos[0], s.pos[1], s.pos[2]);
+      this.hoverMarker.material.color.set(s.sold ? '#ff5a5a' : '#ffffff').multiplyScalar(2);
     }
     this.renderer.domElement.style.cursor = hit ? 'pointer' : 'grab';
     this.emit('hover', hit ? { ...hit, level: seatLevel ? 'seat' : 'sector', x: e.clientX, y: e.clientY } : null);
   }
 
   clearHover() {
-    if (this.hoverSector) this.hoverSector.mesh.material.emissive.set('#000000');
+    if (this.hoverSector) this.tintSector(this.hoverSector, false);
     this.hoverSector = null;
     this.hoverMarker.visible = false;
     this.emit('hover', null);
@@ -594,39 +535,49 @@ export class StadiumScene {
   resize() {
     const w = this.container.clientWidth, h = this.container.clientHeight;
     this.renderer.setSize(w, h);
+    this.composer?.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
 
   tick() {
-    const dt = this.clock.getDelta();
+    const dt = Math.min(this.clock.getDelta(), 0.05);
     const time = this.clock.elapsedTime;
     if (this.anim) {
       const a = this.anim;
       a.t = Math.min(1, a.t + dt / a.duration);
       const k = ease(a.t);
-      // Bézier cuadrática para que los saltos entre asientos "vuelen" en arco
-      const p = a.from.pos.clone().multiplyScalar((1 - k) * (1 - k))
-        .addScaledVector(a.ctrl, 2 * (1 - k) * k)
-        .addScaledVector(a.to.pos, k * k);
-      this.camera.position.copy(p);
-      this.controls.target.lerpVectors(a.from.target, a.to.target, k);
-      this.camera.fov = a.from.fov + (a.to.fov - a.from.fov) * k;
+      const pos = a.curve.getPoint(k);
+      this.camera.position.copy(pos);
+      const look = a.lookAt(k, pos);
+      if (look.isQuaternion) this.camera.quaternion.copy(look);
+      else this.camera.lookAt(look);
+      this.camera.fov = a.fov0 + (a.fov1 - a.fov0) * smooth(a.t);
       this.camera.updateProjectionMatrix();
-      this.camera.lookAt(this.controls.target);
+      if (a.showRoofAt && a.t > a.showRoofAt) this.roof.group.visible = true;
       if (a.t >= 1) {
         this.anim = null;
+        if (a.finalTarget) this.controls.target.copy(a.finalTarget);
         this.controls.enabled = true;
         a.onDone?.();
+        this.controls.update();
         this.emit('arrived', this.mode);
       }
     } else {
       this.controls.update();
     }
-    const bob = Math.sin(time * 3) * 0.35;
+    this.match.update(dt);
+    this.crowd.material.uniforms.uTime.value = time;
+    this.ledTex.offset.x = (time * 0.01) % 1;
     for (const mk of [this.selMarker, ...this.recoMarkers]) {
-      if (mk.visible) { mk.position.y = mk.userData.baseY + bob; mk.rotation.y = time * 1.5; }
+      if (!mk.visible) continue;
+      const u = mk.userData.beam.material.uniforms;
+      u.uTime.value = time;
+      // El haz se desvanece cuando la cámara se acerca (para no atravesarlo)
+      const d = Math.hypot(this.camera.position.x - mk.position.x, this.camera.position.z - mk.position.z);
+      u.uFade.value = THREE.MathUtils.smoothstep(d, 6, 30);
+      mk.userData.glow.material.opacity = 0.85 * THREE.MathUtils.smoothstep(d, 3, 12);
     }
-    this.renderer.render(this.scene, this.camera);
+    this.composer.render();
   }
 }

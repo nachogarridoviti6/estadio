@@ -1,11 +1,9 @@
 // Genera el inventario completo del recinto (sectores + asientos) a partir de la
 // configuración. Es JS puro (sin Three.js) para poder usarlo en servidor/tests.
 
+import { BowlContour } from './bowl.js';
 import { scoreSeats } from '../analysis/viewScore.js';
 import { computeAmenities } from '../analysis/amenities.js';
-
-const UP = [0, 1, 0];
-const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
 function mulberry32(seed) {
   return function () {
@@ -15,117 +13,131 @@ function mulberry32(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-
 const round5 = (v) => Math.round(v / 5) * 5;
 
-export function generateVenue(cfg, { seed = 7 } = {}) {
+// Tramos del contorno base que ocupa cada grada (las esquinas van con los fondos).
+export function standRanges(c) {
+  const { a, b } = c, q = c.q();
+  const ends = 2 * q + 2 * b;
+  return [
+    [-a, a],
+    [a, a + ends],
+    [a + ends, a + ends + 2 * a],
+    [a + ends + 2 * a, a + 2 * ends + 2 * a],
+  ];
+}
+
+// Altura del peto de cada nivel, calculada como en el diseño real de gradas:
+// lo más alto posible sin tapar la línea de banda desde la primera fila.
+export function parapetTop(cfg, tier) {
+  const eyeY = tier.h0 + cfg.eyeHeight;
+  const tan = eyeY / (cfg.bowl.sideGap + tier.u0 + tier.rowDepth * 0.5);
+  const top = eyeY - (tier.rowDepth * 0.5 + 0.35) * tan - 0.05;
+  return Math.min(top, tier.h0 + 1.1);
+}
+
+export function makeContour(cfg) {
+  return new BowlContour(
+    cfg.pitch.length / 2 + cfg.bowl.endGap,
+    cfg.pitch.width / 2 + cfg.bowl.sideGap,
+    cfg.bowl.cornerRadius,
+  );
+}
+
+export function generateVenue(cfg, { seed = 11 } = {}) {
   const rand = mulberry32(seed);
+  const contour = makeContour(cfg);
+  const zoneByKey = {};
+  for (const z of cfg.zones || []) for (const k of z.sectors) zoneByKey[k] = z;
+
   const sectors = [];
   const seats = [];
-  const { seatWidth: sw, rowDepth: rd, aisle } = cfg;
+  const ranges = standRanges(contour);
 
-  for (const tierKey of ['lower', 'upper']) {
-    const tier = cfg.tiers[tierKey];
-    let sectorCounter = 1;
-
-    for (const stand of cfg.stands) {
-      const n = stand.normal;
-      const t = cross(n, UP);
-      const edgePt = [n[0] * stand.edge, 0, n[2] * stand.edge];
-      const sectorLen = stand.seatsPerSector * sw;
-      const total = stand.sectors * sectorLen + (stand.sectors - 1) * aisle;
-
+  cfg.tiers.forEach((tier, ti) => {
+    const nextTier = cfg.tiers[ti + 1];
+    let counter = 1;
+    cfg.stands.forEach((stand, si) => {
+      const [S0, S1] = ranges[si];
+      const span = (S1 - S0 - cfg.aisle * stand.sectors) / stand.sectors;
       for (let j = 0; j < stand.sectors; j++) {
-        const id = `${tier.digit}${String(sectorCounter++).padStart(2, '0')}`;
-        const basePrice = round5(stand.price[tierKey] * stand.centerPremium[j]);
-        const s0 = -total / 2 + j * (sectorLen + aisle);
-        // Ocupación por sector: los sectores céntricos se venden más.
-        const occupancy = 0.45 + 0.35 * stand.centerPremium[j] * rand();
-        // En la grada de animación se ve el partido de pie.
-        const standing = (cfg.zones || []).some((z) => z.id === 'animacion' && z.sectors.includes(id));
-        const eyeH = standing ? cfg.standingEyeHeight : cfg.eyeHeight;
+        const id = `${tier.digit}${String(counter++).padStart(2, '0')}`;
+        const key = `${stand.id}${tier.digit}-${j + 1}`;
+        const zone = zoneByKey[key] || null;
+        const s0 = S0 + cfg.aisle / 2 + j * (span + cfg.aisle);
+        const s1 = s0 + span;
+        const center = (stand.sectors - 1) / 2;
+        const centrality = 1 - 0.22 * (Math.abs(j - center) / center);
+        let basePrice = round5(cfg.tierPrice[tier.key] * stand.priceFactor * centrality);
+        if (zone?.id === 'vip') basePrice = round5(basePrice * 2.4);
+        const standing = zone?.id === 'animacion';
+        const occupancy = 0.5 + 0.35 * centrality * rand() + (standing ? 0.25 : 0);
 
         const sector = {
-          id,
-          name: `Sector ${id}`,
-          standId: stand.id,
-          standName: stand.name,
-          tier: tierKey,
-          tierLabel: tier.label,
-          index: j,
-          basePrice,
-          // geometría para el 3D
-          frame: { origin: edgePt, normal: n, tangent: t },
-          sRange: [s0, s0 + sectorLen],
-          uFront: stand.front + tier.offset,
-          rows: tier.rows,
-          rise: tier.rise,
-          h0: tier.h0,
-          seatIdx: [],
+          id, key, name: `Sector ${id}`,
+          standId: stand.id, standName: stand.name,
+          tier: tier.key, tierLabel: tier.label, tierIndex: ti,
+          index: j, basePrice, zone,
+          s0, s1, rows: tier.rows, rowDepth: tier.rowDepth, rise: tier.rise, h0: tier.h0, u0: tier.u0,
+          rowStart: [], rowCount: [], seatIdx: [],
         };
 
         for (let r = 0; r < tier.rows; r++) {
-          const u = sector.uFront + r * rd + rd * 0.5;
+          const u = tier.u0 + r * tier.rowDepth + tier.rowDepth * 0.5;
           const h = tier.h0 + r * tier.rise;
-          // Banda de precio: primeras filas de grada baja algo más baratas.
-          const price = tierKey === 'lower' && r < 4 ? round5(basePrice * 0.9) : basePrice;
+          const price = ti === 0 && r < 4 ? round5(basePrice * 0.9) : basePrice;
           const rowBias = rand() * 0.25 - 0.12;
-
-          for (let k = 0; k < stand.seatsPerSector; k++) {
-            const s = s0 + (k + 0.5) * sw;
-            const pos = [
-              edgePt[0] + n[0] * u + t[0] * s,
-              h,
-              edgePt[2] + n[2] * u + t[2] * s,
-            ];
-            const eu = u + 0.05;
-            const eye = [
-              edgePt[0] + n[0] * eu + t[0] * s,
-              h + eyeH,
-              edgePt[2] + n[2] * eu + t[2] * s,
-            ];
+          const list = contour.distribute(s0, s1, u, cfg.seatWidth);
+          sector.rowStart.push(seats.length);
+          sector.rowCount.push(list.length);
+          const eyeH = standing ? cfg.standingEyeHeight : cfg.eyeHeight;
+          list.forEach((s, k) => {
+            const p = contour.at(s, u);
+            const e = contour.at(s, u + 0.05);
             const idx = seats.length;
             seats.push({
               idx,
               sectorId: id,
               row: r + 1,
               number: k + 1,
-              pos,
-              eye,
-              normal: n,
-              standing,
+              s,
+              pos: [p.x, h, p.z],
+              eye: [e.x, h + eyeH, e.z],
+              normal: [p.nx, 0, p.nz],
+              u,
               price,
+              standing,
               sold: rand() < occupancy + rowBias,
-              distCenter: Math.hypot(eye[0], eye[1], eye[2]),
-              height: eye[1],
+              underOverhang: !!nextTier && u > nextTier.u0,
+              // Obstáculos delante: peto del nivel y cabeza de la fila anterior
+              blockers: [
+                { du: u + 0.05 - (tier.u0 - 0.3), top: parapetTop(cfg, tier), weight: 1 },
+                ...(r > 0 ? [{ du: tier.rowDepth, top: h - tier.rise + 1.25, weight: 0.22 }] : []),
+              ],
+              sAct: (k + 0.5) * cfg.seatWidth,
+              rowLen: list.length * cfg.seatWidth,
             });
             sector.seatIdx.push(idx);
-          }
+          });
         }
         sectors.push(sector);
       }
-    }
-  }
+    });
+  });
 
-  // Bajo voladizo: filas de grada baja que quedan bajo la grada alta.
-  for (const sec of sectors) {
-    if (sec.tier !== 'lower') continue;
-    const overhangU = cfg.stands.find((s) => s.id === sec.standId).front + cfg.tiers.upper.offset;
-    for (const i of sec.seatIdx) {
-      const r = seats[i].row - 1;
-      seats[i].underOverhang = sec.uFront + r * rd + rd * 0.5 > overhangU;
-    }
+  for (const s of seats) {
+    s.distCenter = Math.hypot(s.eye[0], s.eye[1], s.eye[2]);
+    s.height = s.eye[1];
   }
-
   scoreSeats(seats, cfg);
 
   const sectorById = Object.fromEntries(sectors.map((s) => [s.id, s]));
   for (const sec of sectors) {
     const avail = sec.seatIdx.filter((i) => !seats[i].sold);
     sec.available = avail.length;
-    sec.minPrice = Math.min(...avail.map((i) => seats[i].price));
+    sec.minPrice = avail.length ? Math.min(...avail.map((i) => seats[i].price)) : sec.basePrice;
   }
-  const venue = { cfg, sectors, seats, sectorById };
+  const venue = { cfg, contour, sectors, seats, sectorById };
   computeAmenities(venue);
   return venue;
 }

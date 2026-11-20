@@ -116,3 +116,16 @@ button, select { font: inherit; color: inherit; }
   .hint { bottom: 12px; font-size: 12px; max-width: calc(100vw - 24px); white-space: normal; text-align: center; }
   .legend { display: none !important; }
 }
+
+.loading { position: fixed; inset: 0; background: radial-gradient(circle at 50% 40%, #13203f, #05070d 70%);
+  display: grid; place-items: center; z-index: 50; transition: opacity 0.8s; }
+.loading.done { opacity: 0; pointer-events: none; }
+.loading-box { text-align: center; width: min(320px, 80vw); }
+.loading .logo { font-size: 44px; }
+.loading-title { font-weight: 800; font-size: 22px; margin: 4px 0 14px; }
+.loading-msg { color: var(--muted); font-size: 13px; margin-bottom: 10px; }
+.loading-track { height: 4px; background: #ffffff14; border-radius: 4px; overflow: hidden; }
+.loading-bar { height: 100%; width: 0; background: var(--green); transition: width 0.4s; }
+.approx { position: fixed; right: 16px; bottom: 16px; font-size: 11px; color: var(--muted); background: var(--panel);
+  border: 1px solid var(--line); padding: 5px 10px; border-radius: 999px; }
+body:has(.panel:not(.hidden)) .approx { display: none; }

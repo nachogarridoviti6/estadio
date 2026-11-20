@@ -3,11 +3,19 @@ import { generateVenue } from './venue/generateVenue.js';
 import { findBetterDeals, findContextualTips } from './analysis/recommend.js';
 import { StadiumScene } from './scene/StadiumScene.js';
 
+const $ = (id) => document.getElementById(id);
+const setLoading = (msg, p) => {
+  $('loadingMsg').textContent = msg;
+  $('loadingBar').style.width = `${Math.round(p * 100)}%`;
+};
+setLoading('Calculando 75.000 vistas…', 0.03);
+await new Promise((r) => setTimeout(r, 30));
 const venue = generateVenue(STADIUM);
-const scene = new StadiumScene(document.getElementById('stage'), venue);
+const scene = await StadiumScene.create($('stage'), venue, setLoading);
+$('loading').classList.add('done');
+setTimeout(() => $('loading').remove(), 800);
 window.__seatview = { venue, scene }; // útil para depurar
 
-const $ = (id) => document.getElementById(id);
 const state = { seat: null, deals: [], qty: 2 };
 $('eventName').textContent = `${STADIUM.event} · ${STADIUM.name}`;
 
@@ -118,6 +126,7 @@ function renderPanel() {
         <div class="metric"><div class="v">${Math.round(s.elevAngle)}°</div><div class="l">ángulo de visión</div></div>
       </div>
       <div class="chips">${seatChips(s).map(([ok, icon, txt]) => `<span class="chip ${ok}">${icon} ${txt}</span>`).join('')}</div>
+      ${s.hiddenFrac > 0.04 ? `<div class="warn">⚠ El peto de la grada tapa parte de la banda más cercana (~${Math.round(s.hiddenFrac * 100)}% del campo).</div>` : ''}
       ${s.underOverhang ? '<div class="warn">⚠ Bajo el voladizo de la grada superior: puedes perder balones altos.</div>' : ''}
       <button class="buy" id="buyBtn">Comprar ${state.qty > 1 ? `${state.qty} entradas` : 'entrada'} · ${eur(s.price * state.qty)}</button>
     </div>`;

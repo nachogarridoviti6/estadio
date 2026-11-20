@@ -1,8 +1,9 @@
 // Atributos "de experiencia" de cada asiento, más allá de la vista:
-//   - covered: protegido de la lluvia por la cubierta o la grada superior
-//   - accessDist: metros andando hasta el acceso (vomitorio) más cercano
-//   - barDist: metros hasta el bar/aseos más cercano (acceso + anillo interior)
-//   - zone: zona especial (animación, visitante, familiar...)
+//   - covered: protegido de la lluvia (fuera del óculo de la cubierta o bajo
+//     el nivel superior)
+//   - accessDist: metros andando hasta el vomitorio más cercano
+//   - barDist: metros hasta el bar/aseos más cercano
+//   - zone: zona especial (animación, visitante, familiar, VIP...)
 
 function insideRoundedRect(x, z, hx, hz, r) {
   const ax = Math.abs(x), az = Math.abs(z);
@@ -14,39 +15,22 @@ function insideRoundedRect(x, z, hx, hz, r) {
 export function computeAmenities(venue) {
   const { cfg, sectors, seats } = venue;
   const roof = cfg.roof;
-  const zoneBySector = {};
-  for (const z of cfg.zones || []) for (const id of z.sectors) zoneBySector[id] = z;
+  const m = roof.rainMargin;
 
   for (const sec of sectors) {
-    sec.zone = zoneBySector[sec.id] || null;
-    const accessRow = cfg.access[sec.tier].row;
-    const aisleHalf = cfg.aisle / 2;
-    // Accesos a ambos lados del sector (pasillos / escaleras laterales)
-    sec.accessS = [sec.sRange[0] - aisleHalf, sec.sRange[1] + aisleHalf];
+    const accessRow = cfg.access[sec.tier];
     sec.accessRow = accessRow;
-    const perRow = sec.seatIdx.length / sec.rows;
-
-    sec.seatIdx.forEach((i, n) => {
+    for (const i of sec.seatIdx) {
       const s = seats[i];
-      const k = n % perRow;
-      const sPos = sec.sRange[0] + (k + 0.5) * cfg.seatWidth;
-      // Recorrido por la fila + subir/bajar escalones (cuestan más que andar en llano)
-      let best = Infinity, bestS = 0;
-      for (const a of sec.accessS) {
-        const d = Math.abs(sPos - a) + Math.abs(s.row - accessRow) * cfg.rowDepth * 1.8 + 3;
-        if (d < best) { best = d; bestS = a; }
-      }
-      s.accessDist = Math.round(best);
-      // Bares cada barSpacing metros en el anillo interior de cada grada
-      const toBar = Math.abs(bestS - Math.round(bestS / cfg.barSpacing) * cfg.barSpacing);
-      s.barDist = Math.round(best + 8 + toBar);
+      // Andar por la fila hasta el pasillo + subir/bajar escalones hasta el vomitorio
+      const lateral = Math.min(s.sAct, s.rowLen - s.sAct) + cfg.aisle / 2;
+      s.accessDist = Math.round(lateral + Math.abs(s.row - accessRow) * sec.rowDepth * 1.8 + 3);
+      // Bares en el anillo interior, cada barSpacing metros
+      const ringPos = (sec.index * 37 + (s.sAct < s.rowLen / 2 ? 0 : s.rowLen)) % cfg.barSpacing;
+      s.barDist = Math.round(s.accessDist + 8 + Math.min(ringPos, cfg.barSpacing - ringPos));
       s.zone = sec.zone?.id || null;
-
-      // Cubierto si está fuera del hueco de la cubierta (con margen por lluvia
-      // inclinada) o bajo el voladizo de la grada superior.
-      const m = roof.rainMargin;
       s.covered = s.underOverhang ||
         !insideRoundedRect(s.eye[0], s.eye[2], roof.hx + m, roof.hz + m, roof.r);
-    });
+    }
   }
 }
