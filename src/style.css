@@ -1,0 +1,103 @@
+:root {
+  --bg: #070b16;
+  --panel: rgba(13, 18, 32, 0.92);
+  --line: rgba(255, 255, 255, 0.09);
+  --text: #eef2fb;
+  --muted: #95a3c0;
+  --green: #36f28f;
+  --gold: #ffc83d;
+  --accent: #4d7cff;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; overflow: hidden; }
+button, select { font: inherit; color: inherit; }
+#app, #stage { position: fixed; inset: 0; }
+#stage canvas { display: block; }
+.hidden { display: none !important; }
+
+#topbar { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: space-between;
+  align-items: center; gap: 12px; padding: 14px 18px; flex-wrap: wrap;
+  background: linear-gradient(#070b16ee, #070b1600); pointer-events: none; }
+#topbar > * { pointer-events: auto; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.logo { font-size: 26px; color: var(--green); }
+.brand-name { font-weight: 800; letter-spacing: 0.02em; }
+.event { font-size: 13px; color: var(--muted); }
+.controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.seg { display: flex; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+.seg button { background: none; border: 0; padding: 7px 12px; border-radius: 7px; cursor: pointer; font-size: 13px; color: var(--muted); }
+.seg button.on { background: var(--accent); color: #fff; }
+.qty { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 4px 6px 4px 12px; }
+.qty select { background: #1a2238; border: 0; border-radius: 6px; padding: 4px 6px; }
+
+.back { position: fixed; left: 18px; top: 84px; background: var(--panel); border: 1px solid var(--line);
+  padding: 9px 14px; border-radius: 10px; cursor: pointer; }
+.back:hover { border-color: var(--accent); }
+.hint { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: var(--panel);
+  border: 1px solid var(--line); padding: 9px 16px; border-radius: 999px; font-size: 13px; color: var(--muted);
+  white-space: nowrap; }
+
+.legend { position: fixed; left: 18px; bottom: 22px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 12px; font-size: 12px; color: var(--muted); min-width: 200px; }
+.legend .bar { height: 8px; border-radius: 4px; margin: 6px 0 4px; }
+.legend .ends { display: flex; justify-content: space-between; }
+
+.tooltip { position: fixed; pointer-events: none; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 10px; padding: 9px 12px; font-size: 13px; transform: translate(14px, 14px); min-width: 170px; }
+.tooltip b { display: block; font-size: 14px; margin-bottom: 2px; }
+.tooltip .sub { color: var(--muted); font-size: 12px; }
+.tooltip .sold { color: #ff7a7a; }
+
+.panel { position: fixed; right: 16px; top: 84px; bottom: 16px; width: 360px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 16px; overflow-y: auto; backdrop-filter: blur(10px); }
+.card { padding: 18px; border-bottom: 1px solid var(--line); }
+.card .where { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.card h2 { margin: 4px 0 2px; font-size: 21px; }
+.card .price { font-size: 26px; font-weight: 800; margin-top: 10px; }
+.card .price small { font-size: 13px; color: var(--muted); font-weight: 500; }
+.score { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.score .num { font-size: 30px; font-weight: 800; width: 62px; height: 62px; border-radius: 50%;
+  display: grid; place-items: center; border: 3px solid var(--green); }
+.score .txt { font-size: 13px; color: var(--muted); line-height: 1.4; }
+.score .txt b { color: var(--text); }
+.metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+.metric { background: #ffffff08; border-radius: 10px; padding: 8px; }
+.metric .v { font-weight: 700; font-size: 16px; }
+.metric .l { font-size: 11px; color: var(--muted); }
+.warn { margin-top: 10px; font-size: 12px; color: #ffb36b; }
+.buy { width: 100%; margin-top: 14px; padding: 12px; border: 0; border-radius: 10px; background: var(--green);
+  color: #062414; font-weight: 800; cursor: pointer; font-size: 15px; }
+
+.deals { padding: 16px 18px 20px; }
+.deals h3 { margin: 0 0 4px; font-size: 15px; }
+.deals .lead { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
+.deal { display: block; width: 100%; text-align: left; background: #ffffff07; border: 1px solid var(--line);
+  border-radius: 12px; padding: 0; margin-bottom: 10px; cursor: pointer; overflow: hidden; }
+.deal:hover { border-color: var(--gold); }
+.deal img { width: 100%; aspect-ratio: 16 / 9; display: block; background: #0d1426; }
+.deal .body { padding: 10px 12px; display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.deal .t { font-weight: 700; font-size: 14px; }
+.deal .s { font-size: 12px; color: var(--muted); }
+.deal .save { text-align: right; white-space: nowrap; }
+.deal .save .p { font-weight: 800; }
+.deal .save .d { font-size: 12px; color: var(--green); font-weight: 700; }
+.tag { display: inline-block; font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 4px;
+  margin-left: 6px; vertical-align: middle; text-transform: uppercase; }
+.tag.better { background: var(--green); color: #062414; }
+.tag.similar { background: var(--gold); color: #2b1e00; }
+.ok { background: #36f28f14; border: 1px solid #36f28f40; border-radius: 12px; padding: 12px; font-size: 13px; }
+
+.toast { position: fixed; top: 84px; left: 50%; transform: translateX(-50%); background: #2b1015;
+  border: 1px solid #ff6b6b66; color: #ffd0d0; padding: 9px 16px; border-radius: 10px; font-size: 13px; }
+
+@media (max-width: 760px) {
+  #topbar { padding: 10px 12px; }
+  .event { display: none; }
+  .seg button { padding: 6px 8px; font-size: 12px; }
+  .back { top: auto; bottom: calc(46vh + 10px); left: 12px; }
+  .panel { left: 0; right: 0; top: auto; bottom: 0; width: auto; height: 46vh; border-radius: 16px 16px 0 0; }
+  .hint { bottom: 12px; font-size: 12px; max-width: calc(100vw - 24px); white-space: normal; text-align: center; }
+  .legend { display: none !important; }
+}

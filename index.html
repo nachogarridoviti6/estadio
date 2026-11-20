@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SeatView · Elige tu asiento</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <div id="stage"></div>
+
+    <header id="topbar">
+      <div class="brand">
+        <span class="logo">◉</span>
+        <div>
+          <div class="brand-name">SeatView</div>
+          <div class="event" id="eventName"></div>
+        </div>
+      </div>
+      <div class="controls">
+        <div class="seg" id="colorMode" role="group" aria-label="Colorear asientos por">
+          <button data-mode="stadium" class="on">Estadio</button>
+          <button data-mode="price">Precio</button>
+          <button data-mode="view">Calidad de vista</button>
+        </div>
+        <label class="qty">Entradas
+          <select id="qty">
+            <option>1</option><option selected>2</option><option>3</option><option>4</option>
+          </select>
+        </label>
+      </div>
+    </header>
+
+    <button id="backBtn" class="back hidden">← Vista general</button>
+    <div id="hint" class="hint">Pasa el ratón por las gradas y haz clic en un sector</div>
+    <div id="legend" class="legend hidden"></div>
+    <div id="tooltip" class="tooltip hidden"></div>
+
+    <aside id="panel" class="panel hidden">
+      <div id="seatCard"></div>
+      <div id="deals"></div>
+    </aside>
+    <div id="toast" class="toast hidden"></div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
