@@ -2,20 +2,31 @@ import * as THREE from 'three';
 import { BowlContour } from '../../venue/bowl.js';
 
 // Cielo nocturno: degradado + estrellas.
+// Cielo: degradado de día (azul despejado de Madrid), atardecer y noche con estrellas.
 export function buildSky(scene) {
-  const geo = new THREE.SphereGeometry(900, 32, 16);
+  const geo = new THREE.SphereGeometry(900, 48, 24);
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: { uDay: { value: 0 }, uGolden: { value: 0 }, uSun: { value: new THREE.Vector3(0, 1, 0) } },
     vertexShader: `varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.); }`,
-    fragmentShader: `varying vec3 vP;
+    fragmentShader: `varying vec3 vP; uniform float uDay; uniform float uGolden; uniform vec3 uSun;
       float h(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,37.719))) * 43758.5453); }
       void main(){
         float t = clamp(vP.y, 0., 1.);
-        vec3 col = mix(vec3(0.10,0.12,0.20), vec3(0.01,0.015,0.04), pow(t, 0.5));
-        col += vec3(0.25,0.18,0.10) * pow(1. - t, 6.) * 0.6;   // resplandor de la ciudad
-        vec3 q = floor(vP * 400.);
-        float s = step(0.9985, h(q)) * t;
-        col += vec3(s) * 0.8;
+        // noche
+        vec3 night = mix(vec3(0.10,0.12,0.20), vec3(0.01,0.015,0.04), pow(t, 0.5));
+        night += vec3(0.25,0.18,0.10) * pow(1. - t, 6.) * 0.6;
+        night += vec3(step(0.9985, h(floor(vP * 400.))) * t) * 0.8;
+        // día
+        vec3 zenith = vec3(0.16, 0.38, 0.82), horizon = vec3(0.66, 0.80, 0.95);
+        vec3 day = mix(horizon, zenith, pow(t, 0.55));
+        // atardecer: horizonte cálido en la dirección del sol
+        float toward = max(dot(normalize(vec3(vP.x, 0., vP.z)), normalize(vec3(uSun.x, 0., uSun.z))), 0.);
+        day = mix(day, vec3(1.0, 0.55, 0.28), uGolden * pow(1. - t, 3.) * (0.35 + 0.65 * toward));
+        // disco y halo del sol
+        float sd = max(dot(vP, normalize(uSun)), 0.);
+        day += vec3(1.0, 0.9, 0.7) * (pow(sd, 900.) * 20. + pow(sd, 12.) * 0.25);
+        vec3 col = mix(night, day * 1.7, uDay);
         gl_FragColor = vec4(col, 1.);
       }`,
   });

@@ -58,7 +58,7 @@ export const STADIUM = {
   tierPrice: { t1: 120, t2: 105, t3: 85, t4: 65, t5: 45 },
 
   // Cubierta: óculo abierto sobre el campo; fuera de él todo está cubierto.
-  roof: { hx: 48, hz: 36.5, r: 6, height: 65, outerHx: 128, outerHz: 104, outerR: 40, rainMargin: 3 },
+  roof: { hx: 48, hz: 36.5, r: 6, height: 65, outerHx: 128, outerHz: 104, outerR: 54, rainMargin: 3 },
   videoBoard: { sideHeight: 6.5, endHeight: 11, tilt: 8 },
 
   // Fila donde está el vomitorio de cada nivel.

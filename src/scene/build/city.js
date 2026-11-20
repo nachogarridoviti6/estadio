@@ -50,7 +50,13 @@ function windowMaterial() {
         float win = step(0.18, f.x) * step(f.x, 0.82) * step(0.25, f.y) * step(f.y, 0.85) * step(3.0, vW.y);
         float lit = step(0.45, h21(cell + floor(vW.xz / 40.0)));
         vec3 warm = mix(vec3(1.0, 0.78, 0.45), vec3(0.75, 0.85, 1.0), h21(cell * 1.7));
+        // Tejados: terraza gris o teja según el edificio
+        float roof = step(0.6, vN.y);
+        vec3 roofCol = h21(floor(vW.xz / 30.0)) > 0.5 ? vec3(0.45, 0.25, 0.18) : vec3(0.42, 0.42, 0.44);
+        diffuseColor.rgb = mix(diffuseColor.rgb, roofCol, roof);
         diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.35 + vec3(0.05, 0.07, 0.1), win * wall);
+        // Franjas de forjado (balcones) cada planta
+        diffuseColor.rgb *= 1.0 - 0.12 * wall * step(0.9, fract(vW.y / 3.3));
         totalEmissiveRadiance += warm * win * wall * lit * uNight * 1.6;`);
   };
   mat.customProgramCacheKey = () => 'windows';
@@ -127,7 +133,8 @@ export function buildCity(scene) {
   const bMat = windowMaterial();
   const bGeo = new THREE.BoxGeometry(1, 1, 1); bGeo.translate(0, 0.5, 0);
   const buildings = new THREE.InstancedMesh(bGeo, bMat, blocks.length);
-  const tints = ['#c7b9a4', '#b5a891', '#d4cbbd', '#a89c8a', '#bfb3a1', '#9ea3a8', '#d9d2c6'].map((c) => new THREE.Color(c));
+  // Paleta de Madrid: ladrillo, enfoscados claros, ocres y algún edificio moderno
+  const tints = ['#e9e6df', '#f1efe9', '#a9573c', '#b8664a', '#d8c7a8', '#c9a27c', '#8c4a35', '#dcd6cc', '#9aa3ad', '#e3d3b6'].map((c) => new THREE.Color(c));
   blocks.forEach(([x, z, w, d, h], i) => {
     m.compose(new THREE.Vector3(x, -1.6, z), new THREE.Quaternion(), new THREE.Vector3(w, h, d));
     buildings.setMatrixAt(i, m);

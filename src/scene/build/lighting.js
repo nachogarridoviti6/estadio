@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { Sky } from 'three/examples/jsm/objects/Sky.js';
 
 // Iluminación según la hora del partido: cielo físico + sol con sombras de
 // día, focos del estadio de noche, y la mezcla de ambos al atardecer.
@@ -12,13 +11,7 @@ export class LightingRig {
     this.nightSky = nightSky;
     this.pmrem = new THREE.PMREMGenerator(renderer);
 
-    this.sky = new Sky();
-    this.sky.scale.setScalar(2000);
-    this.sky.material.uniforms.turbidity.value = 2.2;
-    this.sky.material.uniforms.rayleigh.value = 2.2;
-    this.sky.material.uniforms.mieCoefficient.value = 0.003;
-    this.sky.material.uniforms.mieDirectionalG.value = 0.82;
-    scene.add(this.sky);
+    this.sky = nightSky; // cúpula única: día, atardecer y noche
 
     this.hemi = new THREE.HemisphereLight('#bcc8ff', '#202430', 0.55);
     scene.add(this.hemi);
@@ -50,9 +43,10 @@ export class LightingRig {
     const golden = THREE.MathUtils.smoothstep(elev, -2, 4) * (1 - THREE.MathUtils.smoothstep(elev, 8, 25));
     this.day = day;
 
-    this.sky.visible = elev > -8;
-    this.nightSky.visible = day < 0.6;
-    this.sky.material.uniforms.sunPosition.value.set(sunDir[0], sunDir[1], sunDir[2]);
+    const u = this.sky.material.uniforms;
+    u.uDay.value = day;
+    u.uGolden.value = golden;
+    u.uSun.value.set(sunDir[0], sunDir[1], sunDir[2]);
 
     const key = this.key;
     if (day > 0.15) {
@@ -76,6 +70,7 @@ export class LightingRig {
     if (day > 0.3) {
       this.skyScene ||= new THREE.Scene();
       const s2 = this.sky.clone();
+      s2.material = this.sky.material;
       this.skyScene.clear();
       this.skyScene.add(s2);
       this.envRT?.dispose();
@@ -86,10 +81,10 @@ export class LightingRig {
       this.scene.environment = this.nightEnv;
       this.scene.environmentIntensity = 0.5;
     }
-    const fogCol = new THREE.Color('#0b0f1c').lerp(new THREE.Color('#9fbde3'), day);
+    const fogCol = new THREE.Color('#0b0f1c').lerp(new THREE.Color('#a9c6ea'), day);
     this.scene.fog.color.copy(fogCol);
-    this.scene.fog.near = THREE.MathUtils.lerp(450, 700, day);
-    this.scene.fog.far = THREE.MathUtils.lerp(1300, 3200, day);
+    this.scene.fog.near = THREE.MathUtils.lerp(450, 900, day);
+    this.scene.fog.far = THREE.MathUtils.lerp(1300, 4200, day);
     this.renderer.toneMappingExposure = THREE.MathUtils.lerp(1.0, 0.55, day);
     if (lamps) lamps.material.color.set('#fff6e0').multiplyScalar(6 * (1 - day * 0.8) + 0.5);
     return { day, elev };
