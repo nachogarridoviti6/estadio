@@ -155,7 +155,7 @@ export class Match {
   }
 }
 
-export async function loadMatch(scene, url = '/assets/Xbot.glb') {
+export async function loadMatch(scene, url = import.meta.env.BASE_URL + 'assets/Xbot.glb') {
   const gltf = await new GLTFLoader().loadAsync(url);
   return new Match(scene, gltf);
 }

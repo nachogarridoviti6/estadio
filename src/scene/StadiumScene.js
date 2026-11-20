@@ -88,8 +88,8 @@ export class StadiumScene {
 
     onProgress('Cargando iluminación y texturas…', 0.1);
     const [env, grass] = await Promise.all([
-      new RGBELoader().loadAsync('/assets/moonless_golf_1k.hdr'),
-      new THREE.TextureLoader().loadAsync('/assets/grasslight-big.jpg'),
+      new RGBELoader().loadAsync(import.meta.env.BASE_URL + 'assets/moonless_golf_1k.hdr'),
+      new THREE.TextureLoader().loadAsync(import.meta.env.BASE_URL + 'assets/grasslight-big.jpg'),
     ]);
     const pmrem = new THREE.PMREMGenerator(r);
     this.nightEnv = pmrem.fromEquirectangular(env).texture;

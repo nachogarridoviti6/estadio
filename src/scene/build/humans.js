@@ -5,7 +5,7 @@ import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
 const loader = new GLTFLoader();
 const load = (url) => new Promise((res, rej) => loader.load(url, res, undefined, rej));
 
-export async function loadHumanAssets(base = '/assets/') {
+export async function loadHumanAssets(base = import.meta.env.BASE_URL + 'assets/') {
   const [male, female, anim] = await Promise.all([
     load(base + 'readyplayer.me.glb'),
     load(base + 'Michelle.glb'),

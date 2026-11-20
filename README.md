@@ -3,34 +3,44 @@
 Ver la vista real desde tu asiento **antes de comprar la entrada**, y que la web te avise
 si hay asientos con vista igual o mejor por menos dinero.
 
-## Arrancar
+**Web:** https://nachogarridoviti6.github.io/estadio/
+
+## Qué hace
+
+- Estadio en 3D (modelo aproximado del Santiago Bernabéu) con vista exterior, recorte y vuelo
+  de cámara hasta el asiento elegido.
+- Vista desde cada asiento con público, jugadores animados y nota de calidad de vista (0-10).
+- Recomendador: asientos libres con vista igual o mejor por menos dinero, con N asientos juntos.
+- Consejos según el asiento: lluvia, salida, grada de animación, afición visitante, familias.
+- **Hora del partido:** posición real del sol en Madrid; luz de día, atardecer o noche y
+  cuánto sol/sombra tendrá cada asiento durante el partido.
+- Mapas de color por precio, calidad de vista y sol/sombra.
+
+## Arrancar en local
 
 ```bash
 npm install
 npm run dev
 ```
 
+La web se publica sola en GitHub Pages cada vez que se sube algo a `main`.
+
 ## Estadio
 
-Modelo **aproximado** del Santiago Bernabéu (reforma 2019-2024) con datos públicos:
-5 niveles de grada continuos, cubierta con óculo a 65 m, videomarcador 360°,
-anillo LED y fachada de lamas. Filas, pendientes y distancias son estimaciones:
-con los planos oficiales solo hay que cambiar `src/venue/stadiumConfig.js`.
+Modelo **aproximado** del Santiago Bernabéu (reforma 2019-2024) con datos públicos y fotos:
+5 niveles de grada, cubierta con óculo, fachada de lamas de acero, videomarcador 360°.
+Numeración de sectores según el plano de zonas. Filas, pendientes y distancias son
+estimaciones: con los planos oficiales solo hay que cambiar `src/venue/stadiumConfig.js`.
 
 ## Recursos 3D (`public/assets`)
 
-Modelos y texturas de ejemplo del repositorio de three.js (avatar Ready Player Me,
-Xbot y Soldier de Mixamo, césped, HDR nocturno). Valen para el prototipo; para un
+Modelos y texturas de ejemplo del repositorio de three.js. Valen para el prototipo; para un
 producto comercial hay que sustituirlos por recursos con licencia comercial.
 
 ## Estructura
 
-- `src/venue/stadiumConfig.js`: definición del recinto (gradas, sectores, filas, precios). Un estadio real = otro fichero de config.
-- `src/venue/generateVenue.js`: genera el inventario de asientos (JS puro, sin 3D).
-- `src/analysis/viewScore.js`: puntuación objetiva de la vista (0–10 y percentil).
-- `src/analysis/recommend.js`: busca asientos libres con vista ≥ y precio < (soporta N asientos juntos).
-- `src/venue/bowl.js`: geometría del graderío continuo (filas paralelas con esquinas).
-- `src/scene/build/`: estadio (gradas, césped, cubierta, fachada), público (impostores
-  generados desde modelos 3D), jugadores animados.
-- `src/scene/StadiumScene.js`: render (sombras, bloom), animaciones de cámara, selección.
-- `src/main.js`: interfaz (ficha del asiento, recomendaciones, modos de color).
+- `src/venue/`: configuración del recinto, geometría del graderío y generación de asientos.
+- `src/analysis/`: nota de vista, servicios (accesos, cubierto), sol/sombra y recomendador.
+- `src/scene/build/`: gradas, césped, cubierta, exterior, ciudad, público, jugadores, luz.
+- `src/scene/StadiumScene.js`: render, animaciones de cámara y selección.
+- `src/main.js`: interfaz.
